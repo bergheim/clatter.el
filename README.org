@@ -303,7 +303,10 @@ Or, with =use-package=:
 
 #+BEGIN_SRC emacs-lisp
 (use-package clatter
-  :ensure t)
+  :ensure t
+  :config
+  (require 'gnutls)
+  (clatter-setup))
 #+END_SRC
 
 *** Manual (from source)
@@ -313,6 +316,7 @@ Clone this repository and add to your =load-path=:
 #+BEGIN_SRC emacs-lisp
 (add-to-list 'load-path "~/path/to/clatter.el")
 (require 'clatter)
+(require 'gnutls)
 (clatter-setup)
 #+END_SRC
 
