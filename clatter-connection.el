@@ -57,6 +57,8 @@
   recv-buffer          ; string: incomplete data from last read
   ;; ISUPPORT (005) parameters
   isupport             ; hash-table: param -> value (from RPL_ISUPPORT)
+  ;; AWAY (305/306) state
+  away-p               ; non-nil if away
   ;; MOTD/WHOIS accumulation
   -motd-lines          ; list: accumulating MOTD lines
   -whois-data)         ; plist: accumulating WHOIS data
@@ -443,6 +445,7 @@ ARGS are keyword arguments that override `clatter-networks' config:
       (setf (clatter-connection-cap-string conn) nil)
       (setf (clatter-connection-sasl-state conn) nil)
       (setf (clatter-connection-ping-sent-time conn) nil)
+      (setf (clatter-connection-away-p conn) nil)
       (clrhash (clatter-connection-active-batches conn))
       (setf (clatter-connection-deferred-batches conn) nil)
       (clrhash (clatter-connection-pending-labels conn))

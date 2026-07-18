@@ -567,6 +567,14 @@ Return the trimmed character."
               (away-msg (nth 0 params)))
          (run-hook-with-args 'clatter-away-hook conn parsed-prefix away-msg)))
 
+      ("305" ; RPL_UNAWAY
+       (setf (clatter-connection-away-p conn) nil)
+       (run-hook-with-args 'clatter-numeric-hook conn command params))
+
+      ("306" ; RPL_NOWAWAY
+       (setf (clatter-connection-away-p conn) t)
+       (run-hook-with-args 'clatter-numeric-hook conn command params))
+
       ;; --- TAGMSG (typing indicators + reactions) ---
       ("TAGMSG"
        (let* ((parsed-prefix (clatter-parse-prefix prefix))

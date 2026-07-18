@@ -123,6 +123,14 @@
   :type 'string
   :group 'clatter)
 
+;; --- Away indicator ---
+
+(defcustom clatter-away-indicator "@"
+  "Indicator appended to nick to indicate we are away."
+  :type '(choice (const :tag "No indicator" nil)
+                 (string :tag "Indicator"))
+  :group 'clatter)
+
 (defcustom clatter-compact-system-messages nil
   "Control compact rendering of presence and moderation events.
 
@@ -1258,8 +1266,10 @@ When BUFFER is nil, use the current buffer."
            (conn (and clatter--network
                       (clatter-get-connection clatter--network)))
            (nick (if conn (or (clatter-connection-nick conn) "") ""))
+           (away-p (and conn (clatter-connection-away-p conn)))
+           (away (if away-p clatter-away-indicator ""))
            (format-spec `((?t . ,target) (?n . ,nick) (?N . ,network)
-                          (?% . "%"))))
+                          (?a . ,away) (?% . "%"))))
       (cond
        ((stringp clatter-prompt-format)
         (format-spec clatter-prompt-format format-spec))
@@ -1275,6 +1285,14 @@ When BUFFER is nil, use the current buffer."
   (or (functionp clatter-prompt-format)
       (and (stringp clatter-prompt-format)
            (string-match-p "\\(?:^\\|[^%]\\)\\(?:%%\\)*%n"
+                           clatter-prompt-format))))
+
+(defun clatter--prompt-format-needs-away-p ()
+  "Return non-nil if `clatter-prompt-format' may depend on the current away
+state."
+  (or (functionp clatter-prompt-format)
+      (and (stringp clatter-prompt-format)
+           (string-match-p "\\(?:^\\|[^%]\\)\\(?:%%\\)*%a"
                            clatter-prompt-format))))
 
 (defun clatter--prompt-shows-nick-p (prompt &optional buffer)
@@ -1590,6 +1608,10 @@ Fall back to the network and target when the buffer has no topic."
            (conn (clatter-get-connection clatter--network))
            (nick (if conn (clatter-connection-nick conn) "?"))
            (nick-str (unless clatter--prompt-shows-nick nick))
+           (away-str (unless (clatter--prompt-format-needs-away-p)
+                       (and conn
+                            (clatter-connection-away-p conn)
+                            clatter-away-indicator)))
            (nicks (clatter-nick-count (current-buffer)))
            (topic-str (if (and (not (memq preset '(topic context)))
                                clatter--topic)
@@ -1600,7 +1622,9 @@ Fall back to the network and target when the buffer has no topic."
                                    (format "[%s/%s]"
                                            clatter--network
                                            (or clatter--target "")))
-                              nick-str
+                              (if (and nick-str away-str)
+                                  (concat nick-str away-str)
+                                (or nick-str away-str))
                               (and show-nicks
                                    (> nicks 0)
                                    (format "(%d)" nicks)))))
@@ -2309,7 +2333,9 @@ COMMAND is the numeric reply code, PARAMS its parameters on CONN."
        (when buf
          (clatter-insert-system buf msg))
        (dolist (buf (clatter-channel-buffers network))
-         (clatter-insert-system buf msg))))
+         (clatter-insert-system buf msg)))
+     (when (clatter--prompt-format-needs-away-p)
+       (clatter--refresh-prompt)))
     ;; --- MODE numerics ---
     ("221"   ; RPL_UMODEIS
      (let* ((network (clatter-connection-network-id conn))
