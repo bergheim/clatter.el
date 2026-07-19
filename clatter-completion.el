@@ -44,25 +44,23 @@ Completes nick names from the current channel."
     (let* ((end (point))
            (start (save-excursion
                     (skip-chars-backward "^ \t\n")
-                    (point)))
-           (prefix (buffer-substring-no-properties start end)))
-      (when (> (length prefix) 0)
-        (let ((nicks (clatter-completion--nicks))
-              (at-start (= start (marker-position clatter--input-marker))))
-          (list start end nicks
-                :exclusive 'no
-                :annotation-function
-                (lambda (nick)
-                  (when clatter--nick-list
-                    (let* ((prefix-and-nick (gethash nick clatter--nick-list))
-                           (prefix-char (car prefix-and-nick)))
-                      (when (and prefix-char (not (string= prefix-char "")))
-                        (format " [%s]" prefix-char)))))
-                :exit-function
-                (lambda (_nick status)
-                  (when (eq status 'finished)
-                    (when (and at-start clatter-completion-add-colon)
-                      (insert ": "))))))))))
+                    (point))))
+      (let ((nicks (clatter-completion--nicks))
+            (at-start (= start (marker-position clatter--input-marker))))
+        (list start end nicks
+              :exclusive 'no
+              :annotation-function
+              (lambda (nick)
+                (when clatter--nick-list
+                  (let* ((prefix-and-nick (gethash nick clatter--nick-list))
+                         (prefix-char (car prefix-and-nick)))
+                    (when (and prefix-char (not (string= prefix-char "")))
+                      (format " [%s]" prefix-char)))))
+              :exit-function
+              (lambda (_nick status)
+                (when (eq status 'finished)
+                  (when (and at-start clatter-completion-add-colon)
+                    (insert ": ")))))))))
 
 ;; --- /command completion ---
 
