@@ -694,8 +694,8 @@ SERVER-TIME overrides the current time for the timestamp."
 (defun clatter-ui--record-pending-self-echo (buffer target sender text msg-type nonce)
   "Record tentative outgoing message metadata for later reconciliation."
   (with-current-buffer buffer
-    (when-let* ((_start (text-property-any (point-min) (point-max)
-                                           'clatter-self-echo-nonce nonce)))
+    (when (text-property-any (point-min) (point-max)
+                             'clatter-self-echo-nonce nonce)
       (push (list :nonce nonce :target target :sender sender :text text
                   :msg-type msg-type :created-at (float-time))
             clatter--pending-self-echoes))))
