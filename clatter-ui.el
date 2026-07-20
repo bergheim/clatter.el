@@ -1772,7 +1772,6 @@ the buffer margin-width variables."
          (buf (or (clatter-get-buffer network channel)
                   (clatter-get-server-buffer network)
                   (clatter-get-or-create-buffer network "*server*" 'server)))
-         (is-muted (clatter-muted-p sender network))
          (invisible (clatter-sender-invisibility sender network)))
     (clatter-ui-setup-buffer-if-needed buf)
     (clatter--insert-system-event
