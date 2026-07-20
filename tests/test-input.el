@@ -340,6 +340,30 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
       (should (= (window-start window) start))
       (should (= (window-point window) clatter--input-padding-end)))))
 
+(ert-deftest clatter-input-oldest-first-overflow-check-is-bounded ()
+  "Refreshing a long history does not scan it from beginning to end."
+  (clatter-input-test--with-window 'oldest-first
+    (let ((inhibit-read-only t)
+          (buffer-undo-list t))
+      (save-excursion
+        (goto-char clatter--messages-marker)
+        (dotimes (index 2000)
+          (insert (format "message-%04d\n" index)))))
+    (set-window-point window clatter--input-padding-end)
+    (set-window-start window clatter--input-padding-end)
+    (let ((history-start (marker-position clatter--input-padding-end))
+          (history-end (point-max))
+          (original-count-screen-lines (symbol-function 'count-screen-lines)))
+      (cl-letf (((symbol-function 'count-screen-lines)
+                 (lambda (&optional beg end count-final-newline candidate-window)
+                   (when (and beg end
+                              (= beg history-start)
+                              (= end history-end))
+                     (ert-fail "Refreshed by scanning the complete history"))
+                   (funcall original-count-screen-lines
+                            beg end count-final-newline candidate-window))))
+        (clatter--refresh-input-spacers buffer)))))
+
 (ert-deftest clatter-input-oldest-first-overflow-keeps-input-point-at-bottom ()
   "A full following window scrolls minimally without disturbing draft input."
   (clatter-input-test--with-window 'oldest-first

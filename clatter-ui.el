@@ -228,15 +228,20 @@ its final text row while short history grows upward."
       (when start
         (set-window-start window start t)))))
 
+(defun clatter--input-fits-in-window-p (window)
+  "Return non-nil when oldest-first history and input fit in WINDOW.
+Only scan as many screen lines as WINDOW can display so this check stays
+constant-time as message history grows."
+  (save-excursion
+    (goto-char clatter--input-padding-end)
+    (vertical-motion (window-body-height window) window)
+    (eobp)))
+
 (defun clatter--pin-input-in-window (window)
   "Keep oldest-first input on the bottom line of following WINDOW."
-  (let* ((height (window-body-height window))
-         (used (max 1
-                    (count-screen-lines clatter--input-padding-end
-                                        (point-max) nil window))))
-    (when (or (<= used height)
-              (clatter--window-follows-input-p window))
-      (clatter--recenter-input-window window))))
+  (when (or (clatter--window-follows-input-p window)
+            (clatter--input-fits-in-window-p window))
+    (clatter--recenter-input-window window)))
 
 (defun clatter--refresh-input-spacers (&optional buffer)
   "Refresh bottom-pinned input display for BUFFER's visible windows.
