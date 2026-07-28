@@ -43,6 +43,7 @@
   reconnect-enabled    ; t to auto-reconnect
   reconnect-attempts   ; integer
   reconnect-timer      ; timer object
+  reconnect-stable-timer ; timer that resets backoff after a stable connection
   regain-kill-count    ; integer: consecutive "regained by services" kills
   regain-kill-time     ; float-time of last regain kill, nil if none
   desired-nick         ; string: the configured nick we want to reclaim
@@ -67,6 +68,37 @@
 (defun clatter-get-connection (network-id)
   "Get the connection for NETWORK-ID."
   (gethash network-id clatter-connections))
+
+(defun clatter--cancel-reconnect-timer (conn)
+  "Cancel CONN's pending reconnect attempt, if any."
+  (when-let* ((timer (clatter-connection-reconnect-timer conn)))
+    (cancel-timer timer)
+    (setf (clatter-connection-reconnect-timer conn) nil)))
+
+(defun clatter--cancel-reconnect-stable-timer (conn)
+  "Cancel CONN's pending stable-connection reset, if any."
+  (when-let* ((timer (clatter-connection-reconnect-stable-timer conn)))
+    (cancel-timer timer)
+    (setf (clatter-connection-reconnect-stable-timer conn) nil)))
+
+(defun clatter--start-reconnect-stable-timer (conn)
+  "Reset CONN's reconnect backoff after 60 seconds on the same process."
+  (clatter--cancel-reconnect-stable-timer conn)
+  (let ((process (clatter-connection-process conn))
+        timer)
+    (setq timer
+          (run-at-time
+           60 nil
+           (lambda ()
+             (when (eq timer
+                       (clatter-connection-reconnect-stable-timer conn))
+               (setf (clatter-connection-reconnect-stable-timer conn) nil)
+               (when (and (eq process (clatter-connection-process conn))
+                          (eq (clatter-connection-state conn) :connected))
+                 (setf (clatter-connection-reconnect-attempts conn) 0)
+                 (setf (clatter-connection-regain-kill-count conn) 0)
+                 (setf (clatter-connection-regain-kill-time conn) nil))))))
+    (setf (clatter-connection-reconnect-stable-timer conn) timer)))
 
 ;; --- Debug Logging ---
 
@@ -139,7 +171,8 @@ to avoid blocking Emacs on a dead GnuTLS socket."
 Accumulates partial lines and dispatches complete ones."
   (let* ((network-id (process-get proc :clatter-network-id))
          (conn (clatter-get-connection network-id)))
-    (when conn
+    ;; Ignore late input from a process that no longer owns the connection.
+    (when (and conn (eq proc (clatter-connection-process conn)))
       (setf (clatter-connection-last-activity conn) (float-time))
       ;; Immediately append incoming chunks to the connection buffer.
       (setf (clatter-connection-recv-buffer conn)
@@ -189,12 +222,15 @@ This is the main entry point from the process filter into the handler layer."
   "Process sentinel for PROC handling disconnect EVENT."
   (let* ((network-id (process-get proc :clatter-network-id))
          (conn (clatter-get-connection network-id)))
-    (when conn
+    ;; A superseded process can report its terminal event after a replacement
+    ;; is already installed.  It no longer owns this connection's state.
+    (when (and conn (eq proc (clatter-connection-process conn)))
       (clatter--debug "sentinel: %s %s" network-id (string-trim event))
       (clatter--watchdog "DISCONNECT %s event=%s" network-id (string-trim event))
       (message "[clatter] Disconnected from %s: %s" network-id (string-trim event))
       (setf (clatter-connection-state conn) :disconnected)
       (setf (clatter-connection-process conn) nil)
+      (clatter--cancel-reconnect-stable-timer conn)
       ;; Cancel health timer
       (when (clatter-connection-health-timer conn)
         (cancel-timer (clatter-connection-health-timer conn))
@@ -380,14 +416,13 @@ ARGS are keyword arguments that override `clatter-networks' config:
                       (puthash network-id new-conn clatter-connections)
                       new-conn))))
 
-      ;; Disconnect existing connection if any
-      (when (clatter-connection-process conn)
-        (delete-process (clatter-connection-process conn)))
-
-      ;; Cancel any pending reconnect
-      (when (clatter-connection-reconnect-timer conn)
-        (cancel-timer (clatter-connection-reconnect-timer conn))
-        (setf (clatter-connection-reconnect-timer conn) nil))
+      ;; Detach a superseded process before deleting it so its sentinel cannot
+      ;; schedule a second reconnect for the new attempt.
+      (clatter--cancel-reconnect-timer conn)
+      (clatter--cancel-reconnect-stable-timer conn)
+      (when-let* ((old-process (clatter-connection-process conn)))
+        (setf (clatter-connection-process conn) nil)
+        (delete-process old-process))
 
       (setf (clatter-connection-state conn) :connecting)
       ;; Keep the resolved config after the process is gone so reconnects
@@ -491,8 +526,8 @@ Always starts with CAP LS 302 for IRCv3 negotiation."
   (let ((conn (clatter-get-connection network-id)))
     (when conn
       (setf (clatter-connection-reconnect-enabled conn) nil)
-      (when (clatter-connection-reconnect-timer conn)
-        (cancel-timer (clatter-connection-reconnect-timer conn)))
+      (clatter--cancel-reconnect-timer conn)
+      (clatter--cancel-reconnect-stable-timer conn)
       (when (clatter-connection-nick-reclaim-timer conn)
         (cancel-timer (clatter-connection-nick-reclaim-timer conn))
         (setf (clatter-connection-nick-reclaim-timer conn) nil))
@@ -515,9 +550,8 @@ each process so no orphaned ghost sessions remain on the servers."
     (maphash
      (lambda (_network-id conn)
        (setf (clatter-connection-reconnect-enabled conn) nil)
-       (when (clatter-connection-reconnect-timer conn)
-         (cancel-timer (clatter-connection-reconnect-timer conn))
-         (setf (clatter-connection-reconnect-timer conn) nil))
+       (clatter--cancel-reconnect-timer conn)
+       (clatter--cancel-reconnect-stable-timer conn)
        (when (clatter-connection-nick-reclaim-timer conn)
          (cancel-timer (clatter-connection-nick-reclaim-timer conn))
          (setf (clatter-connection-nick-reclaim-timer conn) nil))
@@ -555,7 +589,8 @@ Added to `kill-emacs-hook'.  No-op unless `clatter-quit-on-exit'."
 If the last disconnect was a recent services nick-regain kill, the
 delay is raised to at least `clatter-regain-kill-backoff' seconds to
 avoid an immediate re-collision and another kill."
-  (unless (eq (clatter-connection-state conn) :connecting)
+  (unless (or (eq (clatter-connection-state conn) :connecting)
+              (clatter-connection-reconnect-timer conn))
     (let* ((attempts (clatter-connection-reconnect-attempts conn))
            (delay (min (* clatter-reconnect-initial-delay (expt 2 attempts))
                        clatter-reconnect-max-delay))
@@ -576,11 +611,15 @@ avoid an immediate re-collision and another kill."
                network-id delay (1+ attempts))
       (run-hook-with-args 'clatter-reconnect-hook network-id delay (1+ attempts))
       (setf (clatter-connection-reconnect-attempts conn) (1+ attempts))
-      (setf (clatter-connection-reconnect-timer conn)
-            (run-at-time delay nil
-                         (lambda ()
-                           (setf (clatter-connection-reconnect-timer conn) nil)
-                           (apply #'clatter-connect network-id overrides)))))))
+      (let (timer)
+        (setq timer
+              (run-at-time
+               delay nil
+               (lambda ()
+                 (when (eq timer (clatter-connection-reconnect-timer conn))
+                   (setf (clatter-connection-reconnect-timer conn) nil)
+                   (apply #'clatter-connect network-id overrides)))))
+        (setf (clatter-connection-reconnect-timer conn) timer)))))
 
 ;; --- Health Monitoring ---
 

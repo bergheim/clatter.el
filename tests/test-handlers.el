@@ -542,6 +542,96 @@
           (should (equal reconnect-args '("znc" :bouncer t))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-reconnect-schedules-only-one-pending-timer ()
+  "Repeated disconnect handling cannot accumulate reconnect timers."
+  (let ((conn (clatter-test-make-connection "retry" "testnick"))
+        (scheduled 0))
+    (setf (clatter-connection-state conn) :disconnected)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (&rest _)
+                     (cl-incf scheduled)
+                     'clatter-test-reconnect-timer)))
+          (clatter--schedule-reconnect conn)
+          (clatter--schedule-reconnect conn)
+          (should (= scheduled 1))
+          (should (= (clatter-connection-reconnect-attempts conn) 1))
+          (should (eq (clatter-connection-reconnect-timer conn)
+                      'clatter-test-reconnect-timer)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-stale-reconnect-callback-cannot-own-newer-timer ()
+  "An obsolete reconnect callback cannot clear or run a replacement timer."
+  (let ((conn (clatter-test-make-connection "retry" "testnick"))
+        callback
+        connect-called)
+    (setf (clatter-connection-state conn) :disconnected)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_delay _repeat function)
+                     (setq callback function)
+                     'old-timer))
+                  ((symbol-function 'clatter-connect)
+                   (lambda (&rest _)
+                     (setq connect-called t))))
+          (clatter--schedule-reconnect conn)
+          (setf (clatter-connection-reconnect-timer conn) 'new-timer)
+          (funcall callback)
+          (should-not connect-called)
+          (should (eq (clatter-connection-reconnect-timer conn) 'new-timer)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-sentinel-ignores-superseded-process ()
+  "A late sentinel from an old process cannot disconnect its replacement."
+  (let* ((conn (clatter-test-make-connection "retry" "testnick"))
+         (old-process 'old-process)
+         (new-process 'new-process)
+         scheduled)
+    (setf (clatter-connection-process conn) new-process
+          (clatter-connection-state conn) :connected)
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-get)
+                   (lambda (process property)
+                     (and (eq process old-process)
+                          (eq property :clatter-network-id)
+                          "retry")))
+                  ((symbol-function 'clatter--schedule-reconnect)
+                   (lambda (_conn) (setq scheduled t))))
+          (clatter--process-sentinel old-process "deleted\n")
+          (should-not scheduled)
+          (should (eq (clatter-connection-process conn) new-process))
+          (should (eq (clatter-connection-state conn) :connected)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-reconnect-stable-timer-belongs-to-current-process ()
+  "Only the current process's stable timer can reset reconnect backoff."
+  (let* ((conn (clatter-test-make-connection "retry" "testnick"))
+         (first-process (make-pipe-process :name "clatter-test-stable-1" :noquery t))
+         (second-process (make-pipe-process :name "clatter-test-stable-2" :noquery t))
+         callback
+         cancelled)
+    (setf (clatter-connection-process conn) first-process
+          (clatter-connection-reconnect-attempts conn) 4
+          (clatter-connection-regain-kill-count conn) 2
+          (clatter-connection-regain-kill-time conn) 10.0)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_delay _repeat function)
+                     (setq callback function)
+                     'stable-timer))
+                  ((symbol-function 'cancel-timer)
+                   (lambda (timer) (setq cancelled timer))))
+          (clatter--start-reconnect-stable-timer conn)
+          (setf (clatter-connection-process conn) second-process)
+          (funcall callback)
+          (should (= (clatter-connection-reconnect-attempts conn) 4))
+          (setf (clatter-connection-reconnect-stable-timer conn) 'old-stable)
+          (clatter--start-reconnect-stable-timer conn)
+          (should (eq cancelled 'old-stable)))
+      (ignore-errors (delete-process first-process))
+      (ignore-errors (delete-process second-process))
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-nickserv-recovery-never-sends-network-password ()
   "Manual GHOST and REGAIN never append a server or bouncer password."
   (let ((conn (clatter-test-make-connection "znc" "testnick"))

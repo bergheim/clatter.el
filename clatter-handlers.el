@@ -269,14 +269,8 @@ Return the trimmed character."
                           (clatter-connection-network-id conn)
                           (clatter-connection-nick conn))
        (setf (clatter-connection-state conn) :connected)
-       ;; Reset reconnect attempts after 60s of stable connection
-       (let ((this-conn conn))
-         (run-at-time 60 nil
-                      (lambda ()
-                        (when (eq (clatter-connection-state this-conn) :connected)
-                          (setf (clatter-connection-reconnect-attempts this-conn) 0)
-                          (setf (clatter-connection-regain-kill-count this-conn) 0)
-                          (setf (clatter-connection-regain-kill-time this-conn) nil)))))
+       ;; Reset reconnect attempts only if this process remains stable.
+       (clatter--start-reconnect-stable-timer conn)
        (let* ((process (clatter-connection-process conn))
               ;; The process plist contains keyword overrides supplied to
               ;; `clatter-connect'.  Fall back to the saved network config
