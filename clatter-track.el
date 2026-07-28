@@ -385,6 +385,20 @@ Add to `consult-buffer-sources' to enable.")
 
 ;; --- Interactive commands ---
 
+(defun clatter-track-clear-all ()
+  "Clear activity and record the latest read time for every Clatter target.
+Return the number of live target buffers processed.  Muted and excluded
+targets are included because this command clears Clatter's entire read state."
+  (interactive)
+  (let ((buffers (clatter-all-buffers)))
+    (dolist (buffer buffers)
+      (clatter-clear-activity buffer))
+    (clatter-track--update)
+    (when (called-interactively-p 'interactive)
+      (message "Cleared Clatter activity in %d target%s"
+               (length buffers) (if (= (length buffers) 1) "" "s")))
+    (length buffers)))
+
 (defun clatter-track-switch ()
   "Switch to the clatter buffer with the most urgent activity.
 Priority: mentions > DMs > highest unread count."

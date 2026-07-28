@@ -72,6 +72,39 @@
       (when (buffer-live-p first) (kill-buffer first))
       (when (buffer-live-p second) (kill-buffer second)))))
 
+(ert-deftest clatter-track-clear-all-includes-filtered-targets ()
+  "Clear-all resets and records every target, including excluded ones."
+  (let ((clatter-track-exclude-targets '("#hidden"))
+        (clatter-track-muted-channels '("#muted"))
+        recorded
+        (updates 0))
+    (unwind-protect
+        (let ((hidden (clatter-get-or-create-buffer
+                       "track-clear" "#hidden" 'channel))
+              (muted (clatter-get-or-create-buffer
+                      "track-clear" "#muted" 'channel)))
+          (dolist (buffer (list hidden muted))
+            (with-current-buffer buffer
+              (setq-local clatter--unread-count 3)
+              (setq-local clatter--has-mention t)))
+          (cl-letf (((symbol-function 'clatter-read-state-record-buffer)
+                     (lambda (buffer) (push buffer recorded)))
+                    ((symbol-function 'clatter-track--update)
+                     (lambda () (cl-incf updates))))
+            (should (= (clatter-track-clear-all) 2)))
+          (dolist (buffer (list hidden muted))
+            (with-current-buffer buffer
+              (should (zerop clatter--unread-count))
+              (should-not clatter--has-mention)))
+          (should (= updates 1))
+          (should (equal (sort recorded
+                               (lambda (a b)
+                                 (string< (buffer-name a) (buffer-name b))))
+                         (sort (list hidden muted)
+                               (lambda (a b)
+                                 (string< (buffer-name a) (buffer-name b)))))))
+      (clatter-test-cleanup))))
+
 (provide 'test-track)
 
 ;;; test-track.el ends here
