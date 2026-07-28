@@ -336,12 +336,27 @@ The presence of the item follows `clatter-track-in-buffer-mode-line'."
 
 ;; --- Auto-clear on buffer switch ---
 
-(defun clatter-track--on-buffer-switch ()
-  "Clear activity for the current buffer when it becomes visible."
-  (when (and (derived-mode-p 'clatter-mode)
-             (> clatter--unread-count 0))
-    (clatter-clear-activity (current-buffer))
-    (clatter-track--update)))
+(defun clatter-track--selected-window (context)
+  "Return CONTEXT's selected live window, or nil.
+CONTEXT may be a frame or window as supplied by the window change hooks."
+  (let ((window
+         (cond
+          ((framep context) (frame-selected-window context))
+          ((windowp context) context)
+          (t (selected-window)))))
+    (when (and (window-live-p window)
+               (eq window (frame-selected-window (window-frame window))))
+      window)))
+
+(defun clatter-track--on-buffer-switch (window)
+  "Clear activity for the Clatter buffer selected in WINDOW."
+  (when-let* ((window (clatter-track--selected-window window))
+              (buffer (window-buffer window)))
+    (with-current-buffer buffer
+      (when (and (derived-mode-p 'clatter-mode)
+                 (> clatter--unread-count 0))
+        (clatter-clear-activity buffer)
+        (clatter-track--update)))))
 
 ;; --- Consult integration ---
 
@@ -451,6 +466,8 @@ Priority: mentions > DMs > highest unread count."
         (run-with-timer 1 2 #'clatter-track--update))
   ;; Hook into buffer switches
   (add-hook 'window-buffer-change-functions #'clatter-track--window-change)
+  (add-hook 'window-selection-change-functions
+            #'clatter-track--selection-change)
   ;; Hook into clatter activity
   (add-hook 'clatter-privmsg-hook #'clatter-track--on-activity)
   (add-hook 'clatter-action-hook #'clatter-track--on-activity-action)
@@ -470,6 +487,8 @@ Priority: mentions > DMs > highest unread count."
     (cancel-timer clatter-track--timer)
     (setq clatter-track--timer nil))
   (remove-hook 'window-buffer-change-functions #'clatter-track--window-change)
+  (remove-hook 'window-selection-change-functions
+               #'clatter-track--selection-change)
   (remove-hook 'clatter-privmsg-hook #'clatter-track--on-activity)
   (remove-hook 'clatter-action-hook #'clatter-track--on-activity-action)
   (remove-hook 'clatter-notice-hook #'clatter-track--on-activity-notice)
@@ -478,10 +497,13 @@ Priority: mentions > DMs > highest unread count."
   (when (called-interactively-p 'interactive)
     (message "[clatter-track] Activity tracking disabled")))
 
-(defun clatter-track--window-change (&rest _)
-  "Update the tracker when the selected window's buffer changes.
-Ignores its arguments; suitable for `window-buffer-change-functions'."
-  (clatter-track--on-buffer-switch))
+(defun clatter-track--window-change (context)
+  "Clear activity when CONTEXT's selected window changes buffers."
+  (clatter-track--on-buffer-switch context))
+
+(defun clatter-track--selection-change (context)
+  "Clear activity when CONTEXT selects an already-visible chat window."
+  (clatter-track--on-buffer-switch context))
 
 ;; --- Activity hooks ---
 
