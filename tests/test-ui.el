@@ -620,7 +620,8 @@ system messages."
                       (quit) (part) (join) (away)
                       (quit part) (quit join) (quit away)
                       (part join) (part away) (join away)
-                      (quit part join) (part join away)))
+                      (quit part join) (part join away)
+                      (quit part join away)))
       (let ((clatter-compact-system-messages 'compact)
             (clatter-message-order order)
             (clatter-nick-column-width 14)
@@ -647,9 +648,11 @@ system messages."
                                         (unless (memq 'join hidden) "→ carol")
                                         (unless (memq 'away hidden) "○ dave"))))
                            (expected
-                            (concat (make-string 13 ?\s)
-                                    (string-join visible-events " · ")
-                                    "\n")))
+                            (if visible-events
+                                (concat (make-string 13 ?\s)
+                                        (string-join visible-events " · ")
+                                        "\n")
+                              "")))
                 (should (equal (clatter-test--visible-text start end)
                                expected))
                 (dotimes (_ 2)
@@ -680,6 +683,8 @@ system messages."
            buffer 'part '(:nick "bob" :channel "#test") 'part)
           (clatter--insert-system-event
            buffer 'join '(:nick "carol" :channel "#test") '(join noise))
+          (clatter--insert-system-event
+           buffer 'away '(:nick "dave" :channel "#test") '(away noise))
           (with-current-buffer buffer
             (let ((groups 0)
                   (position (point-min)))
@@ -702,7 +707,7 @@ system messages."
               (should
                (equal (clatter-test--visible-text start end)
                       (concat (make-string 13 ?\s)
-                              "× alice · ← bob · → carol\n")))
+                              "× alice · ← bob · → carol · ○ dave\n")))
               (visible-mode -1)
               (should (equal (clatter-test--visible-text start end)
                              (concat (make-string 13 ?\s) "← bob\n"))))))))))

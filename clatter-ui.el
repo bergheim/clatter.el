@@ -1037,13 +1037,16 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
                (unless any-visible
                  (overlay-get overlay
                               'clatter-compact-system-invisible)))))
-          ;; A hidden newline visually joins the last visible action to the
-          ;; following line.  In `oldest-first' buffers that following line is
-          ;; the input prompt, so always expose the boundary whenever any
-          ;; action in the compact group is visible.
-          (when (and newline-position any-visible)
-            (remove-text-properties newline-position group-end
-                                    '(invisible nil display nil)))
+          ;; Keep a visible group separated from the following line, but
+          ;; collapse its boundary again when every action becomes hidden.
+          (when newline-position
+            (if any-visible
+                (remove-text-properties newline-position group-end
+                                        '(invisible nil display nil))
+              (put-text-property
+               newline-position group-end 'invisible
+               (and first-event-start
+                    (get-text-property first-event-start 'invisible)))))
           (setq position group-end)))
       (clatter--refresh-input-spacers (current-buffer)))))
 
@@ -1116,7 +1119,8 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
                     (separator-invisible
                      (delete-dups
                       (append (ensure-list (plist-get group :last-invisible))
-                              (ensure-list invisible)))))
+                              (ensure-list invisible)
+                              nil))))
                 (let ((inhibit-read-only t)
                       (buffer-undo-list t))
                   (save-excursion
