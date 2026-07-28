@@ -662,8 +662,8 @@ system messages."
                   (should (equal (clatter-test--visible-text start end)
                                  expected)))))))))))
 
-(ert-deftest clatter-test-compact-system-noise-splits-groups-without-misalignment ()
-  "Noise-tagged actions do not pull an active PART out of alignment."
+(ert-deftest clatter-test-compact-system-mixes-smart-visibility-in-one-group ()
+  "Noise-tagged actions group with visible actions without misalignment."
   (dolist (order '(oldest-first newest-first))
     (let ((clatter-compact-system-messages 'compact)
           (clatter-message-order order)
@@ -693,21 +693,19 @@ system messages."
                            start 'clatter-compact-system-group-id
                            nil (point-max))
                           (point-max))))
-              (should (= groups 3)))
-            (let* ((part-position
-                    (save-excursion
-                      (goto-char (point-min))
-                      (search-forward "← bob")
-                      (match-beginning 0)))
-                   (line-start (save-excursion
-                                 (goto-char part-position)
-                                 (line-beginning-position)))
-                   (line-end (save-excursion
-                               (goto-char part-position)
-                               (1+ (line-end-position)))))
+              (should (= groups 1)))
+            (pcase-let ((`(,start . ,end)
+                          (clatter-test--compact-group-bounds)))
+              (should (equal (clatter-test--visible-text start end)
+                             (concat (make-string 13 ?\s) "← bob\n")))
+              (visible-mode 1)
               (should
-               (equal (clatter-test--visible-text line-start line-end)
-                      (concat (make-string 13 ?\s) "← bob\n"))))))))))
+               (equal (clatter-test--visible-text start end)
+                      (concat (make-string 13 ?\s)
+                              "× alice · ← bob · → carol\n")))
+              (visible-mode -1)
+              (should (equal (clatter-test--visible-text start end)
+                             (concat (make-string 13 ?\s) "← bob\n"))))))))))
 
 (ert-deftest clatter-test-compact-system-appends-preserve-visual-line-prefixes ()
   "Appended compact actions retain wrapping alignment in Visual Line mode."

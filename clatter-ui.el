@@ -1095,15 +1095,13 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
 
 (defun clatter--append-compact-system-group (buffer event text invisible)
   "Append TEXT to BUFFER's compatible compact EVENT group.
-Return non-nil when the event was grouped.  INVISIBLE must match the
-existing group's visibility categories."
+Return non-nil when the event was grouped.  Each action retains its own
+INVISIBLE categories so smart-hidden and visible actions can share a group."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (let* ((group clatter--compact-system-group)
              (tail (plist-get group :tail)))
         (when (and group
-                   (equal (clatter--compact-system-visibility invisible)
-                          (plist-get group :visibility))
                    (= clatter--message-generation
                       (plist-get group :generation))
                    (clatter--compact-system-group-tail-valid-p group buffer))
@@ -1191,8 +1189,6 @@ existing group's visibility categories."
                                  invisible))))
               (setq clatter--compact-system-group
                     (list :id group-id
-                          :visibility
-                          (clatter--compact-system-visibility invisible)
                           :last-invisible invisible
                           :generation clatter--message-generation
                           :time (clatter--compact-system-now)
