@@ -244,7 +244,7 @@ TYPE is server, channel, or query (auto-detected if nil)."
 (defun clatter-input-ring-add (input)
   "Add INPUT to the input history ring."
   (ring-insert clatter-input-ring input)
-  (setq clatter-input-ring-index 0))
+  (setq clatter-input-ring-index -1))
 
 (defun clatter-input-ring-nth (n)
   "Get element N steps back in the input history ring.
