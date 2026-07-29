@@ -30,7 +30,8 @@
 ;; Quick start:
 ;;
 ;;   (require 'clatter)
-;;   (setq clatter-networks
+;;   (require 'gnutls)
+;;   (setopt clatter-networks
 ;;     '(("libera"
 ;;        :server "irc.libera.chat"
 ;;        :port 6697
@@ -38,6 +39,7 @@
 ;;        :nick "yournick"
 ;;        :sasl plain
 ;;        :autojoin ("#systemcrafters" "#commonlisp"))))
+;;   (clatter-setup)
 ;;   (clatter-connect "libera")
 
 ;;; Code:
