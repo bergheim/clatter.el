@@ -14,6 +14,9 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'image)
+
+(declare-function image-size "image.c" (spec &optional pixels frame))
 
 ;; --- Configuration ---
 
