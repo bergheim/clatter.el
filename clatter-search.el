@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'clatter-config)
 (require 'clatter-model)
+(require 'clatter-log)
 
 ;; --- Configuration ---
 

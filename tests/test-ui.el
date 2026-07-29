@@ -1419,8 +1419,8 @@ system messages."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
-(ert-deftest clatter-test-batch-playback-skips-already-read-history ()
-  "Batch playback renders only messages newer than the persisted read state."
+(ert-deftest clatter-test-batch-playback-renders-read-history-without-activity ()
+  "Batch playback renders seen messages without marking them unread."
   (let ((conn (clatter-test-make-connection "libera" "me"))
         (buf nil)
         (clatter-read-state-enabled t)
@@ -1437,14 +1437,19 @@ system messages."
           (clatter-ui--on-batch-complete
            conn "chathistory" "#emacs"
            (list (list :type 'privmsg :sender "alice"
-                       :text "already read" :time old)
+                       :text "me: older message" :time old)
+                 (list :type 'privmsg :sender "carol"
+                       :text "last-read message" :time last-read)
                  (list :type 'privmsg :sender "bob"
                        :text "new message" :time new)))
           (with-current-buffer buf
             (let ((rendered (buffer-string)))
-              (should-not (string-match-p "already read" rendered))
+              (should (string-match-p "me: older message" rendered))
+              (should (string-match-p "last-read message" rendered))
               (should (string-match-p "new message" rendered))
-              (should (string-match-p "end of history (1 messages)" rendered)))))
+              (should (string-match-p "end of history (3 messages)" rendered))
+              (should (= clatter--unread-count 1))
+              (should-not clatter--has-mention))))
       (clatter-test-cleanup)
       (when buf
         (clatter-remove-buffer "libera" "#emacs")
