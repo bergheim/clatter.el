@@ -133,6 +133,21 @@ SERVER-TIME is the IRCv3 server-time value."
   (when server-time
     (setq-local clatter-chathistory--last-timestamp server-time)))
 
+(defun clatter-chathistory--track-batch-timestamp (conn _batch-type target messages)
+  "Track the newest timestamp in completed history MESSAGES for TARGET."
+  (let ((buf (clatter-get-buffer (clatter-connection-network-id conn) target))
+        latest)
+    (dolist (message messages)
+      (let ((timestamp (plist-get message :time)))
+        (when (and timestamp
+                   (or (null latest) (time-less-p latest timestamp)))
+          (setq latest timestamp))))
+    (when (and buf latest)
+      (with-current-buffer buf
+        (when (or (null clatter-chathistory--last-timestamp)
+                  (time-less-p clatter-chathistory--last-timestamp latest))
+          (setq-local clatter-chathistory--last-timestamp latest))))))
+
 ;; --- Interactive commands ---
 
 (defun clatter-chathistory-request (&optional count)
@@ -174,6 +189,8 @@ COUNT defaults to `clatter-chathistory-limit'."
   (interactive)
   (add-hook 'clatter-join-hook #'clatter-chathistory--on-join)
   (add-hook 'clatter-privmsg-hook #'clatter-chathistory--track-timestamp)
+  (add-hook 'clatter-batch-complete-hook
+            #'clatter-chathistory--track-batch-timestamp)
   (when (called-interactively-p 'interactive)
     (message "[clatter-chathistory] Enabled")))
 
@@ -182,6 +199,8 @@ COUNT defaults to `clatter-chathistory-limit'."
   (interactive)
   (remove-hook 'clatter-join-hook #'clatter-chathistory--on-join)
   (remove-hook 'clatter-privmsg-hook #'clatter-chathistory--track-timestamp)
+  (remove-hook 'clatter-batch-complete-hook
+               #'clatter-chathistory--track-batch-timestamp)
   (message "[clatter-chathistory] Disabled"))
 
 ;; Enabled by `clatter-setup' when `clatter-chathistory-enabled' is

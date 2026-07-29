@@ -20,6 +20,13 @@
 
 ;; --- CAP LS / REQ / ACK / NAK ---
 
+(defun clatter-cap--finish-negotiation (conn)
+  "Finish CAP negotiation, register CONN, and release deferred playback."
+  (clatter-send conn "CAP END")
+  (clatter-cap--send-registration conn)
+  (setf (clatter-connection-cap-negotiating conn) nil)
+  (run-hook-with-args 'clatter-cap-complete-hook conn))
+
 (defun clatter-cap--parse-list (caps-string)
   "Parse a space-separated capability list from CAPS-STRING.
 Strips =value suffixes (e.g., \"sasl=PLAIN,EXTERNAL\" -> \"sasl\")."
@@ -119,8 +126,7 @@ Dispatches based on subcommand (LS, ACK, NAK)."
                                      (string-join caps-to-request " "))))
       (progn
         (clatter--debug "No IRCv3 capabilities to request")
-        (clatter-send conn "CAP END")
-        (clatter-cap--send-registration conn)))))
+        (clatter-cap--finish-negotiation conn)))))
 
 (defun clatter-cap--handle-ack (conn caps-string)
   "Handle CAP ACK response on CONN with CAPS-STRING."
@@ -151,18 +157,14 @@ Dispatches based on subcommand (LS, ACK, NAK)."
           (clatter-send conn "AUTHENTICATE PLAIN"))
          ;; Fallback
          (t
-          (clatter-send conn "CAP END")
-          (clatter-cap--send-registration conn)))
+          (clatter-cap--finish-negotiation conn)))
       ;; No SASL - finish CAP and register
-      (progn
-        (clatter-send conn "CAP END")
-        (clatter-cap--send-registration conn)))))
+      (clatter-cap--finish-negotiation conn))))
 
 (defun clatter-cap--handle-nak (conn caps-string)
   "Handle CAP NAK response on CONN with CAPS-STRING."
   (clatter--debug "Capabilities rejected: %s" caps-string)
-  (clatter-send conn "CAP END")
-  (clatter-cap--send-registration conn))
+  (clatter-cap--finish-negotiation conn))
 
 ;; --- SASL Authentication ---
 
@@ -227,8 +229,7 @@ SERVER-RESPONSE is base64-encoded server message."
   "Handle 903 RPL_SASLSUCCESS on CONN."
   (setf (clatter-connection-sasl-state conn) :done)
   (clatter--debug "SASL authentication successful")
-  (clatter-send conn "CAP END")
-  (clatter-cap--send-registration conn))
+  (clatter-cap--finish-negotiation conn))
 
 (defun clatter-cap-handle-sasl-failure (conn params)
   "Handle 904/905/906 SASL failure on CONN with PARAMS."
@@ -236,8 +237,7 @@ SERVER-RESPONSE is base64-encoded server message."
                      (clatter-connection-network-id conn)
                      (or (nth 1 params) "unknown"))
   (message "[clatter] SASL failed: %s" (or (nth 1 params) "unknown"))
-  (clatter-send conn "CAP END")
-  (clatter-cap--send-registration conn))
+  (clatter-cap--finish-negotiation conn))
 
 ;; --- Registration (NICK/USER/PASS) ---
 

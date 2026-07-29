@@ -75,6 +75,107 @@
             (should (equal (nth 4 args) (clatter-parse-iso8601 time)))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-batch-playback-defers-privmsg ()
+  "BATCH-tagged history bypasses live PRIVMSG hooks until completion."
+  (let ((conn (clatter-test-make-connection))
+        privmsg-calls
+        batch-complete)
+    (unwind-protect
+        (let ((privmsg-handler (lambda (&rest args)
+                                  (push args privmsg-calls)))
+              (batch-handler (lambda (&rest args)
+                               (setq batch-complete args))))
+          (add-hook 'clatter-privmsg-hook privmsg-handler)
+          (add-hook 'clatter-batch-complete-hook batch-handler)
+          (unwind-protect
+              (progn
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       ":server BATCH +history chathistory #emacs"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       "@batch=history :alice!~a@host PRIVMSG #emacs :old message"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse ":server BATCH -history"))
+                (should-not privmsg-calls)
+                (should (equal (nth 1 batch-complete) "chathistory"))
+                (should (equal (nth 2 batch-complete) "#emacs"))
+                (let ((message (car (nth 3 batch-complete))))
+                  (should (eq (plist-get message :type) 'privmsg))
+                  (should (equal (plist-get message :sender) "alice"))
+                  (should (equal (plist-get message :text) "old message"))))
+            (remove-hook 'clatter-privmsg-hook privmsg-handler)
+            (remove-hook 'clatter-batch-complete-hook batch-handler)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-batch-playback-defers-action ()
+  "BATCH-tagged /me history bypasses live ACTION hooks until completion."
+  (let ((conn (clatter-test-make-connection))
+        action-calls
+        batch-complete)
+    (unwind-protect
+        (let ((action-handler (lambda (&rest args)
+                                 (push args action-calls)))
+              (batch-handler (lambda (&rest args)
+                               (setq batch-complete args))))
+          (add-hook 'clatter-action-hook action-handler)
+          (add-hook 'clatter-batch-complete-hook batch-handler)
+          (unwind-protect
+              (progn
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       ":server BATCH +history chathistory #emacs"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       "@batch=history :alice!~a@host PRIVMSG #emacs :\C-aACTION waves\C-a"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse ":server BATCH -history"))
+                (should-not action-calls)
+                (let ((message (car (nth 3 batch-complete))))
+                  (should (eq (plist-get message :type) 'action))
+                  (should (equal (plist-get message :sender) "alice"))
+                  (should (equal (plist-get message :text) "waves"))))
+            (remove-hook 'clatter-action-hook action-handler)
+            (remove-hook 'clatter-batch-complete-hook batch-handler)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-batch-playback-waits-for-cap-negotiation ()
+  "Completed playback waits for CAP negotiation to finish."
+  (let ((conn (clatter-test-make-connection))
+        batch-complete
+        sent
+        registration-sent)
+    (setf (clatter-connection-cap-negotiating conn) t)
+    (unwind-protect
+        (let ((batch-handler (lambda (&rest args)
+                               (setq batch-complete args))))
+          (add-hook 'clatter-batch-complete-hook batch-handler)
+          (unwind-protect
+              (cl-letf (((symbol-function 'clatter-send)
+                         (lambda (_conn line)
+                           (push line sent)))
+                        ((symbol-function 'clatter-cap--send-registration)
+                         (lambda (&rest _)
+                           (setq registration-sent t))))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       ":server BATCH +history chathistory #emacs"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       "@batch=history :alice!~a@host PRIVMSG #emacs :old message"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse ":server BATCH -history"))
+                (should-not batch-complete)
+                (should (clatter-connection-deferred-batches conn))
+                (clatter-cap--finish-negotiation conn)
+                (should-not (clatter-connection-cap-negotiating conn))
+                (should registration-sent)
+                (should (equal (nreverse sent) '("CAP END")))
+                (should (equal (nth 1 batch-complete) "chathistory"))
+                (should-not (clatter-connection-deferred-batches conn)))
+            (remove-hook 'clatter-batch-complete-hook batch-handler)))
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-dispatch-privmsg-dm ()
   "PRIVMSG to our nick dispatches with our nick as target."
   (let ((conn (clatter-test-make-connection "testnet" "testnick")))

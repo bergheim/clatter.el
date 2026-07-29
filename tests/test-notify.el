@@ -184,6 +184,35 @@
                      '(("Mention from alice in #test" . "* waves")
                        ("Invite from bob" . "Invitation to join #clatter")))))))
 
+(ert-deftest clatter-notify-batch-playback-does-not-notify ()
+  "BATCH-delivered history never reaches desktop notifications."
+  (let ((conn (clatter-test-make-connection "testnet" "trev"))
+        (clatter-notify-enabled t)
+        (clatter-notify-on-mention t)
+        (clatter-notify-on-dm nil)
+        (clatter-notify-current-buffer t)
+        (clatter-notify-cooldown 0)
+        (clatter-notify--last-times (make-hash-table :test 'equal))
+        sent)
+    (unwind-protect
+        (let ((notify-handler #'clatter-notify--on-privmsg))
+          (add-hook 'clatter-privmsg-hook notify-handler)
+          (unwind-protect
+              (cl-letf (((symbol-function 'clatter-notify--send)
+                         (lambda (&rest args)
+                           (push args sent))))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       ":server BATCH +history chathistory #test"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse
+                       "@batch=history :alice!~a@host PRIVMSG #test :trev: old message"))
+                (clatter-dispatch-message
+                 conn (clatter-test-parse ":server BATCH -history"))
+                (should-not sent))
+            (remove-hook 'clatter-privmsg-hook notify-handler)))
+      (clatter-test-cleanup))))
+
 (provide 'test-notify)
 
 ;;; test-notify.el ends here

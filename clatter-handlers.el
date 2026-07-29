@@ -110,7 +110,7 @@ Called with (CONN NICK).")
 
 (defvar clatter-batch-complete-hook nil
   "Hook for completed batch delivery.
-Called with (CONN BATCH-TYPE TARGET MESSAGES).")
+Called with (CONN BATCH-TYPE TARGET MESSAGES) after CAP negotiation.")
 
 (defvar clatter-invite-hook nil
   "Hook for INVITE events.
@@ -356,6 +356,7 @@ Return the trimmed character."
               (parsed-tags (clatter-parse-tags tags))
               ;; --- >> EXTRACT MESSAGE TAGS ---
               (server-time (clatter-get-parsed-server-time parsed-tags))
+              (batch-id (clatter-get-parsed-tag parsed-tags "batch"))
               (msgid (clatter-get-parsed-tag parsed-tags "msgid"))
               (is-bot (assoc "bot" parsed-tags))
               (reply-to (or (clatter-get-parsed-tag parsed-tags "+draft/reply")
@@ -381,9 +382,9 @@ Return the trimmed character."
                   (= (aref raw-text 0) 1)
                   (= (aref raw-text (1- (length raw-text))) 1))
              (clatter--handle-ctcp conn parsed-prefix target raw-text status-prefix
-                                   msgid server-time is-bot reply-to is-reply-to-me)
-           (let* ((text (clatter--prepend-status-prefix status-prefix raw-text))
-                  (batch-id (clatter-get-parsed-tag parsed-tags "batch-id")))
+                                  msgid server-time is-bot reply-to is-reply-to-me
+                                  batch-id)
+           (let ((text (clatter--prepend-status-prefix status-prefix raw-text)))
              ;; Mark sender as bot if draft/bot tag present
              (when is-bot
                (setq sender-nick (propertize sender-nick 'clatter-bot t))
@@ -744,9 +745,9 @@ Return the trimmed character."
                              sender target raw-text
                              &optional
                              status-prefix
-                             msgid server-time is-bot reply-to is-reply-to-me)
+                             msgid server-time is-bot reply-to is-reply-to-me batch-id)
   "Handle CTCP request on CONN from SENDER to TARGET with RAW-TEXT, STATUS-PREFIX,
-MSGID, SERVER-TIME, IS-BOT, REPLY-TO, and IS-REPLY-TO-ME."
+MSGID, SERVER-TIME, IS-BOT, REPLY-TO, IS-REPLY-TO-ME, and BATCH-ID."
   (let* ((ctcp-content (substring raw-text 1 (1- (length raw-text))))
          (space-pos (cl-position ?\s ctcp-content))
          (ctcp-cmd (upcase (if space-pos
@@ -771,9 +772,12 @@ MSGID, SERVER-TIME, IS-BOT, REPLY-TO, and IS-REPLY-TO-ME."
            (setq text (propertize text 'clatter-reply-to reply-to)))
          (when is-reply-to-me
            (setq text (propertize text 'clatter-reply-to-me t)))
-         (run-hook-with-args 'clatter-action-hook
-                             conn sender target text
-                             server-time)))
+         (if batch-id
+             (clatter--accumulate-batch conn batch-id sender-nick text server-time
+                                        'action)
+           (run-hook-with-args 'clatter-action-hook
+                               conn sender target text
+                               server-time))))
       ;; Don't respond to our own CTCP requests
       ((guard self-p) nil)
       ("VERSION"
@@ -797,11 +801,28 @@ MSGID, SERVER-TIME, IS-BOT, REPLY-TO, and IS-REPLY-TO-ME."
 
 ;; --- Batch Handling ---
 
-(defun clatter--accumulate-batch (conn batch-id sender text server-time)
-  "Accumulate a message into active batch BATCH-ID on CONN."
+(defun clatter--flush-deferred-batches (conn)
+  "Deliver completed batches deferred while CONN negotiated capabilities."
+  (let ((batches (nreverse (clatter-connection-deferred-batches conn))))
+    (setf (clatter-connection-deferred-batches conn) nil)
+    (dolist (batch batches)
+      (let ((batch-type (nth 0 batch))
+            (target (nth 1 batch))
+            (messages (nth 2 batch)))
+        (run-hook-with-args 'clatter-batch-complete-hook conn
+                            batch-type target messages)))))
+
+(defun clatter--accumulate-batch
+    (conn batch-id sender text server-time &optional msg-type)
+  "Accumulate a MSG-TYPE message into active batch BATCH-ID on CONN.
+
+MSG-TYPE defaults to privmsg."
   (let ((batch (gethash batch-id (clatter-connection-active-batches conn))))
     (when batch
-      (push (list :sender sender :text text :time server-time)
+      (push (list :type (or msg-type 'privmsg)
+                  :sender sender
+                  :text text
+                  :time server-time)
             (plist-get batch :messages)))))
 
 (defun clatter--handle-batch (conn _tags params)
@@ -818,11 +839,18 @@ MSGID, SERVER-TIME, IS-BOT, REPLY-TO, and IS-REPLY-TO-ME."
       (let ((batch (gethash batch-id (clatter-connection-active-batches conn))))
         (when batch
           (let ((messages (nreverse (plist-get batch :messages))))
-            (run-hook-with-args 'clatter-batch-complete-hook conn
-                                (plist-get batch :type)
-                                (plist-get batch :target)
-                                messages))
+            (if (clatter-connection-cap-negotiating conn)
+                (push (list (plist-get batch :type)
+                            (plist-get batch :target)
+                            messages)
+                      (clatter-connection-deferred-batches conn))
+              (run-hook-with-args 'clatter-batch-complete-hook conn
+                                  (plist-get batch :type)
+                                  (plist-get batch :target)
+                                  messages)))
           (remhash batch-id (clatter-connection-active-batches conn)))))))
+
+(add-hook 'clatter-cap-complete-hook #'clatter--flush-deferred-batches)
 
 ;; --- Labeled Response ---
 

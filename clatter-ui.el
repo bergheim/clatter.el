@@ -2205,31 +2205,41 @@ Renders a visual separator before and after history playback."
   (let* ((network (clatter-connection-network-id conn))
          (buf (clatter-get-buffer network target)))
     (when (and buf (buffer-live-p buf) messages)
-      ;; Insert separator before history
-      (let* ((sep-text (propertize
-                        (concat " " (make-string 30 ?-) " history "
-                                (make-string 30 ?-) " ")
-                        'face 'shadow))
-             (count (length messages)))
-        (clatter--insert-message buf sep-text t)
-        ;; Insert each message with dimmed style.  Suppress inline image
-        ;; scanning/fetching for history playback: a large backlog would
-        ;; otherwise scan every old message and stampede curl subprocesses.
-        (let ((clatter--suppress-image-scan t))
-          (dolist (msg messages)
-            (let ((sender (plist-get msg :sender))
-                  (text (plist-get msg :text))
-                  (time (plist-get msg :time)))
-              (clatter-insert-privmsg buf sender text conn time))))
-        ;; Insert end separator
-        (clatter--insert-message
-         buf
-         (propertize (format " %s end of history (%d messages) %s "
-                             (make-string 20 ?-)
-                             count
-                             (make-string 20 ?-))
-                     'face 'shadow)
-         t)))))
+      (let ((messages
+             (cl-remove-if
+              (lambda (msg)
+                (clatter-read-state-message-read-p
+                 buf (plist-get msg :time)))
+              messages)))
+        (when messages
+          ;; Insert separator before history
+          (let* ((sep-text (propertize
+                            (concat " " (make-string 30 ?-) " history "
+                                    (make-string 30 ?-) " ")
+                            'face 'shadow))
+                 (count (length messages)))
+            (clatter--insert-message buf sep-text t)
+            ;; Insert each message with dimmed style.  Suppress inline image
+            ;; scanning/fetching for history playback: a large backlog would
+            ;; otherwise scan every old message and stampede curl subprocesses.
+            (let ((clatter--suppress-image-scan t))
+              (dolist (msg messages)
+                (let ((msg-type (plist-get msg :type))
+                      (sender (plist-get msg :sender))
+                      (text (plist-get msg :text))
+                      (time (plist-get msg :time)))
+                  (pcase msg-type
+                    ('action (clatter-insert-action buf sender text conn time))
+                    (_ (clatter-insert-privmsg buf sender text conn time)))))
+            ;; Insert end separator
+            (clatter--insert-message
+             buf
+             (propertize (format " %s end of history (%d messages) %s "
+                                 (make-string 20 ?-)
+                                 count
+                                 (make-string 20 ?-))
+                         'face 'shadow)
+             t))))))))
 
 ;; --- CTCP replies ---
 

@@ -37,6 +37,7 @@
   cap-string           ; capability string sent by the server
   ;; IRCv3 batch/label tracking
   active-batches       ; hash-table: batch-id -> plist
+  deferred-batches     ; completed batches held until CAP negotiation ends
   pending-labels       ; hash-table: label -> callback
   label-counter        ; integer
   ;; Reconnection
@@ -64,6 +65,10 @@
 
 (defvar clatter-connections (make-hash-table :test 'equal)
   "Hash table mapping network-id to `clatter-connection'.")
+
+(defvar clatter-cap-complete-hook nil
+  "Hook run after CAP negotiation completes.
+Called with (CONN).")
 
 (defun clatter-get-connection (network-id)
   "Get the connection for NETWORK-ID."
@@ -433,11 +438,13 @@ ARGS are keyword arguments that override `clatter-networks' config:
       (setf (clatter-connection-nick conn) nick)
       (setf (clatter-connection-desired-nick conn) nick)
       (setf (clatter-connection-recv-buffer conn) (decode-coding-string "" 'utf-8))
+      (setf (clatter-connection-cap-negotiating conn) nil)
       (setf (clatter-connection-cap-enabled conn) nil)
       (setf (clatter-connection-cap-string conn) nil)
       (setf (clatter-connection-sasl-state conn) nil)
       (setf (clatter-connection-ping-sent-time conn) nil)
       (clrhash (clatter-connection-active-batches conn))
+      (setf (clatter-connection-deferred-batches conn) nil)
       (clrhash (clatter-connection-pending-labels conn))
 
       (message "[clatter] Connecting to %s:%d%s..."

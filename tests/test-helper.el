@@ -42,6 +42,7 @@ NETWORK-ID defaults to \"testnet\", NICK to \"testnick\"."
                :cap-enabled '("server-time" "message-tags" "batch"
                               "echo-message" "multi-prefix")
                :active-batches (make-hash-table :test 'equal)
+               :deferred-batches nil
                :pending-labels (make-hash-table :test 'equal)
                :label-counter 0
                :reconnect-enabled t
