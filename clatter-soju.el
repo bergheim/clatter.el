@@ -126,9 +126,22 @@ NickServ/reclaim) and the bouncer credentials, and deliberately omits
         (setq args (plist-put args key (plist-get control-config key)))))
     args))
 
+(defun clatter-soju--child-live-p (child-id)
+  "Return non-nil if CHILD-ID has a live connection process.
+A child whose server buffer was killed is explicitly disconnected: its
+process is gone, so this returns nil and the control's next fan-out
+re-spawns it (bringing it back when the control reconnects)."
+  (when-let* ((conn (clatter-get-connection child-id))
+             (proc (clatter-connection-process conn)))
+    (process-live-p proc)))
+
 (defun clatter-soju--fan-out (conn)
-  "Spawn bound child connections for every network stashed for CONN.
-Idempotent across reconnects: netids already spawned are skipped."
+  "Spawn child connections for every network stashed for CONN.
+Idempotent across reconnects: a network whose child connection is still
+live is skipped; one whose child was disconnected (e.g. its server buffer
+killed) is re-spawned, so reconnecting the control brings dead children
+back.  `clatter-connect' reuses the child's existing connection struct and
+cancels any pending reconnect, so re-spawning a dead child is safe."
   (let* ((network-id (clatter-connection-network-id conn))
          (state (clatter-soju--state network-id))
          (networks (plist-get state :networks))
@@ -140,15 +153,18 @@ Idempotent across reconnects: netids already spawned are skipped."
     (when control-config
       (maphash
        (lambda (netid attrs)
-         (if (gethash netid children)
-             (clatter--debug "soju: %s already connected via %s; skipping"
-                             netid (gethash netid children))
-           (let* ((child-id (clatter-soju--child-id netid attrs))
-                  (args (clatter-soju--fan-out-args
-                         control-config attrs child-id)))
-             (puthash netid child-id children)
-             (clatter--debug "soju: fanning out %s -> %s" netid child-id)
-             (apply #'clatter-connect child-id args))))
+         (let ((existing (gethash netid children)))
+           (if (and existing (clatter-soju--child-live-p existing))
+               (clatter--debug "soju: %s still connected via %s; skipping"
+                               netid existing)
+             (let* ((child-id (clatter-soju--child-id netid attrs))
+                    (args (clatter-soju--fan-out-args
+                           control-config attrs child-id)))
+               (puthash netid child-id children)
+               (clatter--debug "soju: fanning out %s -> %s%s"
+                               netid child-id
+                               (if existing " (reconnecting)" ""))
+               (apply #'clatter-connect child-id args)))))
        networks))))
 
 (defun clatter-soju--on-batch-complete (conn batch-type _target _messages)

@@ -124,14 +124,16 @@
         (should (equal (plist-get args :server) "soju.example"))))))
 
 (ert-deftest clatter-soju-test-fan-out-is-idempotent ()
-  "Re-running the fan-out does not respawn already-spawned children."
+  "Re-running the fan-out does not respawn a still-live child."
   (clatter-soju-test--reset)
   (let ((clatter-networks
          '(("soju" :server "soju.example" :tls t :nick "me"
             :username "sojuuser" :password "secret" :bouncer t)))
         (spawn-count 0))
     (cl-letf (((symbol-function 'clatter-connect)
-               (lambda (&rest _) (cl-incf spawn-count))))
+               (lambda (&rest _) (cl-incf spawn-count)))
+              ;; The child spawned by run 1 is still live, so run 2 skips it.
+              ((symbol-function 'clatter-soju--child-live-p) (lambda (_) t)))
       (dolist (run '(1 2))
         (let ((conn (clatter-test-make-connection "soju" "me")))
           (setf (clatter-connection-process conn)
@@ -142,8 +144,52 @@
                                    '("42" "name=libera;state=connected"))
           (clatter-soju--on-batch-complete conn "soju.im/bouncer-networks" nil nil)
           (delete-process (clatter-connection-process conn)))))
-    ;; Only the first run spawns; the second sees the child already present.
+    ;; Only the first run spawns; the second sees the child still live.
     (should (= 1 spawn-count))))
+
+(ert-deftest clatter-soju-test-fan-out-respawns-dead-child ()
+  "A child whose connection died (e.g. its buffer was killed) is re-spawned."
+  (clatter-soju-test--reset)
+  (let ((clatter-networks
+         '(("soju" :server "soju.example" :tls t :nick "me"
+            :username "sojuuser" :password "secret" :bouncer t)))
+        (spawn-count 0))
+    (cl-letf (((symbol-function 'clatter-connect)
+               (lambda (&rest _) (cl-incf spawn-count)))
+              ;; Child never live: simulates a killed/disconnected child.
+              ((symbol-function 'clatter-soju--child-live-p) (lambda (_) nil)))
+      (dolist (run '(1 2))
+        (let ((conn (clatter-test-make-connection "soju" "me")))
+          (setf (clatter-connection-process conn)
+                (make-pipe-process :name (format "soju-ctrl-%d" run) :noquery t))
+          (process-put (clatter-connection-process conn) :clatter-config
+                       (cdr (assoc "soju" clatter-networks #'equal)))
+          (clatter-soju--on-bouncer conn "NETWORK"
+                                   '("42" "name=libera;state=connected"))
+          (clatter-soju--on-batch-complete conn "soju.im/bouncer-networks" nil nil)
+          (delete-process (clatter-connection-process conn)))))
+    ;; Both runs spawn because the child is never live.
+    (should (= 2 spawn-count))))
+
+(ert-deftest clatter-soju-test-child-live-p ()
+  "`clatter-soju--child-live-p' tracks the child's process liveness."
+  (clatter-soju-test--reset)
+  ;; No connection at all -> not live.
+  (should-not (clatter-soju--child-live-p "absent"))
+  ;; Live process -> live.
+  (let ((conn (clatter-test-make-connection "libera" "trev"))
+        proc)
+    (unwind-protect
+        (progn
+          (setq proc (make-pipe-process :name "libera-proc" :noquery t))
+          (setf (clatter-connection-process conn) proc)
+          (puthash "libera" conn clatter-connections)
+          (should (clatter-soju--child-live-p "libera"))
+          ;; Dead process -> not live (buffer was killed / disconnected).
+          (delete-process proc)
+          (should-not (clatter-soju--child-live-p "libera")))
+      (when (process-live-p proc) (delete-process proc))
+      (remhash "libera" clatter-connections))))
 
 (ert-deftest clatter-soju-test-batch-complete-ignores-other-types ()
   "Non bouncer-networks batches do not trigger fan-out."
