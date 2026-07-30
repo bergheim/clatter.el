@@ -24,6 +24,19 @@
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
+(ert-deftest clatter-chathistory-batch-ignores-nil-target ()
+  "A target-less batch (e.g. soju.im/bouncer-networks) is a no-op.
+It must not error on (downcase nil) and must not touch any buffer."
+  (let ((conn (clatter-test-make-connection "testnet" "testnick")))
+    (unwind-protect
+        (progn
+          ;; No error, no crash, no buffer created.
+          (clatter-chathistory--track-batch-timestamp
+           conn "soju.im/bouncer-networks" nil
+           (list (list :time (encode-time 0 0 12 1 1 2026 t))))
+          (should-not (clatter-get-buffer "testnet" nil)))
+      (clatter-test-cleanup))))
+
 (provide 'test-chathistory)
 
 ;;; test-chathistory.el ends here

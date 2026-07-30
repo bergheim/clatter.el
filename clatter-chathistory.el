@@ -134,19 +134,23 @@ SERVER-TIME is the IRCv3 server-time value."
     (setq-local clatter-chathistory--last-timestamp server-time)))
 
 (defun clatter-chathistory--track-batch-timestamp (conn _batch-type target messages)
-  "Track the newest timestamp in completed history MESSAGES for TARGET."
-  (let ((buf (clatter-get-buffer (clatter-connection-network-id conn) target))
-        latest)
-    (dolist (message messages)
-      (let ((timestamp (plist-get message :time)))
-        (when (and timestamp
-                   (or (null latest) (time-less-p latest timestamp)))
-          (setq latest timestamp))))
-    (when (and buf latest)
-      (with-current-buffer buf
-        (when (or (null clatter-chathistory--last-timestamp)
-                  (time-less-p clatter-chathistory--last-timestamp latest))
-          (setq-local clatter-chathistory--last-timestamp latest))))))
+  "Track the newest timestamp in completed history MESSAGES for TARGET.
+Only channel/query batches carry a string TARGET; target-less batches
+such as `soju.im/bouncer-networks' are ignored (they have no buffer to
+track a cursor for)."
+  (when (stringp target)
+    (let ((buf (clatter-get-buffer (clatter-connection-network-id conn) target))
+          latest)
+      (dolist (message messages)
+        (let ((timestamp (plist-get message :time)))
+          (when (and timestamp
+                     (or (null latest) (time-less-p latest timestamp)))
+            (setq latest timestamp))))
+      (when (and buf latest)
+        (with-current-buffer buf
+          (when (or (null clatter-chathistory--last-timestamp)
+                    (time-less-p clatter-chathistory--last-timestamp latest))
+            (setq-local clatter-chathistory--last-timestamp latest)))))))
 
 ;; --- Interactive commands ---
 

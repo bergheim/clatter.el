@@ -171,9 +171,13 @@ Populated by WHOX (extended WHO) replies.")
   "Alist mapping (network . target) to buffer objects.")
 
 (defun clatter-get-buffer (network target)
-  "Get existing clatter buffer for NETWORK and TARGET, or nil."
-  (let ((key (cons network (downcase target))))
-    (alist-get key clatter--buffer-alist nil nil #'equal)))
+  "Get existing clatter buffer for NETWORK and TARGET, or nil.
+TARGET must be a string; a nil or non-string TARGET (as carried by
+target-less batches such as `soju.im/bouncer-networks') has no buffer,
+so return nil instead of erroring in `downcase'."
+  (when (stringp target)
+    (let ((key (cons network (downcase target))))
+      (alist-get key clatter--buffer-alist nil nil #'equal))))
 
 (defun clatter-get-server-buffer (network)
   "Get server buffer for NETWORK."
