@@ -197,8 +197,12 @@ outgoing message."
 
 (defcustom clatter-fill-column 80
   "Column at which to wrap messages in channel buffers.
-If nil, wrapping is disabled."
+If nil, wrapping is disabled.  If `auto', the column is derived at
+insert time from the width of the window displaying the buffer (its
+body width), floored one column past the nick indent and capped at
+`clatter-max-line-length'.  An integer fixes the column."
   :type '(choice (const :tag "Disable wrapping" nil)
+                 (const :tag "Wrap to window width" auto)
                  (integer :tag "Column number"))
   :group 'clatter)
 

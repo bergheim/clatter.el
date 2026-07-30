@@ -436,6 +436,28 @@ approach in `erc-update-undo-list'."
             (setcdr cons (+ (cdr cons) shift)))))
         (setq list (cdr list))))))
 
+(defun clatter--effective-fill-column (&optional buffer)
+  "Return the column at which to hard-wrap inserted message text.
+When `clatter-fill-column' is an integer, return it.  When it is the
+symbol `auto', return the body width of the first window displaying
+BUFFER (default: the current buffer), floored one column past the nick
+indent and capped at `clatter-max-line-length'.  With no live window,
+fall back to the selected frame width so headless and temp-buffer
+contexts still wrap.  `window-body-width' already excludes the timestamp
+margin gutter, so no further margin subtraction is needed.  Return nil
+when wrapping is disabled (`clatter-fill-column' is nil) or the derived
+column is too narrow to wrap past the nick indent."
+  (let ((floor-col (1+ clatter-nick-column-width)))
+    (pcase clatter-fill-column
+      ('nil nil)
+      ('auto
+       (let* ((buf (or buffer (current-buffer)))
+              (win (car (get-buffer-window-list buf nil 'visible)))
+              (raw (if win (window-body-width win) (frame-width)))
+              (col (min raw (or clatter-max-line-length 400))))
+         (when (> col floor-col) col)))
+      (col (when (and (integerp col) (> col floor-col)) col)))))
+
 (defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible)
   "Insert formatted TEXT into BUFFER.
 Adds timestamp unless NO-TIMESTAMP is non-nil.
@@ -478,12 +500,12 @@ append at the bottom like a traditional IRC client."
               (when formatted-timestamp
                 (setq clatter--last-formatted-timestamp formatted-timestamp))
               (insert text "\n")
-              (when (and clatter-fill-column
-                         (> clatter-fill-column wrap-col))
-                (let ((fill-column clatter-fill-column)
-                      (fill-prefix wrap-prefix)
-                      (adaptive-fill-mode nil))
-                  (fill-region start (1- (point)))))
+              (when-let* ((eff-col (clatter--effective-fill-column buffer)))
+                (when (> eff-col wrap-col)
+                  (let ((fill-column eff-col)
+                        (fill-prefix wrap-prefix)
+                        (adaptive-fill-mode nil))
+                    (fill-region start (1- (point))))))
               (when ts-str
                 (let ((ov (make-overlay start (1+ start) nil t)))
                   (when clatter-timestamp-side

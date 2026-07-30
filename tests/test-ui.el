@@ -515,6 +515,44 @@
        (equal (buffer-string)
               "<alice> this is a long message that\n        should wrap around the\n        configured fill column\n")))))
 
+(ert-deftest clatter-test-effective-fill-column ()
+  "`clatter--effective-fill-column' resolves integer, auto and nil."
+  (let ((clatter-nick-column-width 7))
+    (with-temp-buffer
+      ;; An integer above the nick-indent floor passes through.
+      (let ((clatter-fill-column 40))
+        (should (= 40 (clatter--effective-fill-column))))
+      ;; An integer at/below the floor disables wrapping (returns nil).
+      (let ((clatter-fill-column 8))           ; floor = 1+7 = 8
+        (should (null (clatter--effective-fill-column))))
+      ;; nil disables wrapping.
+      (let ((clatter-fill-column nil))
+        (should (null (clatter--effective-fill-column))))
+      ;; `auto' with no live window falls back to the frame width; pin it so
+      ;; the result is deterministic.
+      (let ((clatter-fill-column 'auto)
+            (clatter-max-line-length 400))
+        (cl-letf (((symbol-function 'frame-width) (lambda (&optional _) 30)))
+          (should (= 30 (clatter--effective-fill-column))))
+        ;; `auto' is capped at `clatter-max-line-length'.
+        (let ((clatter-max-line-length 20))
+          (cl-letf (((symbol-function 'frame-width) (lambda (&optional _) 200)))
+            (should (= 20 (clatter--effective-fill-column)))))))))
+
+(ert-deftest clatter-test-insert-message-fills-at-auto-column ()
+  "With `clatter-fill-column' `auto', messages hard-wrap to the derived column."
+  (let ((clatter-fill-column 'auto)
+        (clatter-nick-column-width 7)
+        (clatter-max-line-length 400))
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'frame-width) (lambda (&optional _) 30)))
+        (clatter--insert-message
+         (current-buffer)
+         "<alice> this is a long message that should wrap around the auto column"
+         t))
+      ;; A wrapped message produces more than the single trailing newline.
+      (should (> (cl-count ?\n (buffer-string)) 1)))))
+
 ;; --- Fool visibility ---
 
 ;; --- Smart noise visibility ---
