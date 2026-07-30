@@ -114,6 +114,14 @@ Dispatches based on subcommand (LS, ACK, NAK)."
                                  (clatter-connection-network-id conn))))
          (caps-to-request (clatter-cap--find-matching
                            available clatter-wanted-capabilities)))
+    ;; Soju bouncer-networks: requested only on a control connection
+    ;; (`:bouncer t' with a bare username), so single-network bouncer
+    ;; connections and child fan-out connections keep a minimal CAP REQ.
+    (when (clatter-bouncer-networks-p config)
+      (dolist (cap '("soju.im/bouncer-networks"
+                      "soju.im/bouncer-networks-notify"))
+        (when (cl-member cap available :test #'string-equal)
+          (cl-pushnew cap caps-to-request :test #'string-equal))))
     ;; Add SASL if wanted and available
     (when (and (or want-sasl-external want-sasl-plain)
                (cl-member "sasl" available :test #'string-equal))
@@ -192,9 +200,14 @@ For SCRAM-SHA-256: multi-step challenge-response."
 
 (defun clatter-cap--scram-client-first (conn)
   "Send SCRAM-SHA-256 client-first-message on CONN."
-  (let* ((nick (clatter-connection-nick conn))
+  (let* ((config (process-get (clatter-connection-process conn) :clatter-config))
+         (nick (clatter-connection-nick conn))
+         ;; SASL authenticates the account/user, which for a Soju bouncer is
+         ;; the bouncer username (optionally "user/network@client"), not the
+         ;; IRC nick.  Fall back to the nick when unspecified.
+         (authcid (or (and config (plist-get config :username)) nick))
          (password (clatter-get-password (clatter-connection-network-id conn)))
-         (result (clatter-scram-client-first nick password))
+         (result (clatter-scram-client-first authcid password))
          (state (car result))
          (message-b64 (cdr result)))
     ;; Store SCRAM state on the connection process
@@ -217,10 +230,15 @@ SERVER-RESPONSE is base64-encoded server message."
 (defun clatter-cap--sasl-plain-authenticate (conn)
   "Send SASL PLAIN authentication on CONN."
   (let* ((network-id (clatter-connection-network-id conn))
+         (config (process-get (clatter-connection-process conn) :clatter-config))
          (nick (clatter-connection-nick conn))
+         ;; SASL PLAIN authenticates the account/user, which for a Soju bouncer
+         ;; is the bouncer username (optionally "user/network@client"), not the
+         ;; IRC nick.  Fall back to the nick when :username is unspecified.
+         (authcid (or (and config (plist-get config :username)) nick))
          (password (clatter-get-password network-id))
-         ;; SASL PLAIN format: \0username\0password
-         (auth-string (format "%c%s%c%s" 0 nick 0 password))
+         ;; SASL PLAIN format: \0authcid\0password
+         (auth-string (format "%c%s%c%s" 0 authcid 0 password))
          (encoded (base64-encode-string auth-string t)))
     (setf (clatter-connection-sasl-state conn) :authenticating)
     (clatter-send conn (format "AUTHENTICATE %s" encoded))))

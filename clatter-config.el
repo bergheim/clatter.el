@@ -40,7 +40,14 @@ Each entry is a list of (NAME . PLIST) where PLIST contains:
   :autojoin  - List of channels to join on connect
   :password  - Server password (or use auth-source)
   :bouncer   - This connection is to a bouncer which manages upstream
-               NickServ identity and nick reclaim
+               NickServ identity and nick reclaim.  With a bare
+               :username (no \"/network\") it is a Soju-style bouncer
+               control connection: clatter negotiates
+               \`soju.im/bouncer-networks', runs \`BOUNCER LISTNETWORKS',
+               and fans out one child connection per upstream network
+               (routing each child via the \"user/network\" username).
+               With a \"/network\" username suffix it is a single-network
+               bouncer connection and does not fan out.
   :proxy     - SOCKS5 proxy plist (:type socks5 :host H :port P
                [:user U] [:pass P]); see `clatter-proxy'
   :tor       - When non-nil, shorthand for Tor's local SOCKS5
@@ -56,6 +63,20 @@ Example:
      :autojoin (\"#emacs\" \"#commonlisp\")))"
   :type '(repeat (cons string plist))
   :group 'clatter)
+
+(defun clatter-bouncer-networks-p (config)
+  "Return non-nil if CONFIG is a Soju bouncer control connection.
+A `:bouncer t' connection whose effective username (the `:username'
+key, falling back to `:nick') carries no \"/network\" suffix is a
+Soju bouncer-networks control connection: it negotiates
+`soju.im/bouncer-networks', lists networks, and fans out a child
+per upstream.  A \"user/network\" username is a single-network
+bouncer connection and does not fan out, so child connections (which
+the fan-out builds with a \"/network\" suffix) never re-list."
+  (and (plist-get config :bouncer)
+       (let ((user (or (plist-get config :username)
+                       (plist-get config :nick))))
+         (and user (not (string-match-p "/" user))))))
 
 (defcustom clatter-default-nick (user-login-name)
   "Default nickname if not specified per-network."

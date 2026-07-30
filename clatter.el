@@ -63,6 +63,7 @@
 (require 'clatter-nicklist)
 (require 'clatter-log)
 (require 'clatter-url-preview)
+(require 'clatter-soju)
 
 ;; --- Autoload entry points ---
 
@@ -154,7 +155,8 @@ Calling it more than once is harmless."
   (when clatter-chathistory-enabled (clatter-chathistory-enable))
   (when clatter-read-marker-enabled (clatter-read-marker-enable))
   (when clatter-log-enable (clatter-log-init))
-  (when clatter-url-preview-enable (clatter-url-preview-init)))
+  (when clatter-url-preview-enable (clatter-url-preview-init))
+  (when clatter-soju-enabled (clatter-soju-enable)))
 
 (provide 'clatter)
 

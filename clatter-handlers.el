@@ -112,6 +112,13 @@ Called with (CONN NICK).")
   "Hook for completed batch delivery.
 Called with (CONN BATCH-TYPE TARGET MESSAGES) after CAP negotiation.")
 
+(defvar clatter-bouncer-hook nil
+  "Hook for BOUNCER command events (soju.im/bouncer-networks).
+Called with (CONN SUBCOMMAND PARAMS) where PARAMS is the list of raw
+BOUNCER command parameters after the subcommand.  NETWORK notifications
+arrive inside a `soju.im/bouncer-networks' batch; the subcommand and
+netid/attributes are delivered here as-is.")
+
 (defvar clatter-invite-hook nil
   "Hook for INVITE events.
 Called with (CONN SENDER NICK CHANNEL).")
@@ -308,6 +315,18 @@ Return the trimmed character."
        (message "[clatter] Connected to %s as %s"
                 (clatter-connection-network-id conn)
                 (clatter-connection-nick conn))
+       ;; Soju bouncer control connection: ask the bouncer for its upstream
+       ;; network list so the bouncer-networks fan-out can spawn a child
+       ;; connection per network.  Only a control connection (`:bouncer t'
+       ;; with a bare username) lists; child fan-out connections carry a
+       ;; "/network" username and never re-list (avoids loops).
+       (let* ((proc (clatter-connection-process conn))
+              (bn-config (or (and proc (processp proc)
+                                   (process-get proc :clatter-config))
+                              (cdr (assoc (clatter-connection-network-id conn)
+                                          clatter-networks #'equal)))))
+         (when (clatter-bouncer-networks-p bn-config)
+           (clatter-send conn "BOUNCER LISTNETWORKS")))
        ;; Start nick reclaim if we ended up with a fallback nick
        (clatter--maybe-start-nick-reclaim conn))
 
@@ -577,6 +596,14 @@ Return the trimmed character."
       ;; --- BATCH ---
       ("BATCH"
        (clatter--handle-batch conn tags params))
+
+      ;; --- BOUNCER (soju.im/bouncer-networks) ---
+      ;; Server->client BOUNCER messages (NETWORK notifications, LISTNETWORKS
+      ;; replies) run the hook.  FAIL BOUNCER errors arrive as a separate FAIL
+      ;; command and are surfaced by the FAIL case above.
+      ("BOUNCER"
+       (run-hook-with-args 'clatter-bouncer-hook conn
+                           (nth 0 params) (cdr params)))
 
       ;; --- 353 RPL_NAMREPLY ---
       ("353"

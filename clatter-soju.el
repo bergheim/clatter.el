@@ -1,0 +1,173 @@
+;;; clatter-soju.el --- Soju bouncer-networks fan-out -*- lexical-binding: t; -*-
+
+;; Copyright (C) 2026 Glenn Thompson
+;; Author: Glenn Thompson <glenn@paren.works>
+;; SPDX-License-Identifier: MIT
+
+;;; Commentary:
+
+;; Soju (and compatible) bouncer support via the IRCv3
+;; `soju.im/bouncer-networks' extension.
+;;
+;; A "control" network entry configured with `:bouncer t' and the bare
+;; bouncer `:username' (no \"/network\") connects to the bouncer, negotiates
+;; the cap, and runs `BOUNCER LISTNETWORKS'.  The bouncer replies with a
+;; `soju.im/bouncer-networks' batch of `BOUNCER NETWORK <netid> <attributes>'
+;; entries.  This module then spawns a child connection per upstream network
+;; -- each a normal clatter network with its own channels and chathistory --
+;; by calling `clatter-connect' with the \"/network\" username form
+;; (\"<bouncer-user>/<network-name>\"), which Soju routes to the chosen
+;; upstream without any `BOUNCER BIND'.  Children carry a \"/network\"
+;; username, so they are not control connections and never re-list (no
+;; loops).
+;;
+;; Loading this file has no side effects; hooks are installed only when
+;; `clatter-soju-enable' runs (wired into `clatter-setup' behind
+;; `clatter-soju-enabled').  The hooks are no-ops on connections that do not
+;; negotiate bouncer-networks.
+
+;;; Code:
+
+(require 'cl-lib)
+(require 'clatter-config)
+(require 'clatter-connection)
+(require 'clatter-handlers)
+(require 'clatter-protocol)
+
+;; --- Configuration ---
+
+(defcustom clatter-soju-enabled t
+  "Enable Soju bouncer-networks fan-out.
+When non-nil, `clatter-setup' installs the hooks that turn a
+`:bouncer t' control connection (one with a bare bouncer `:username')
+into a set of child connections, one per upstream network advertised
+by the bouncer.  The hooks are inert on ordinary (non-bouncer)
+connections and on single-network bouncer connections."
+  :type 'boolean
+  :group 'clatter)
+
+;; --- Control-connection state ---
+
+;; Each control connection is identified by its clatter network-id.  Its
+;; value is a plist: (:networks HASH netid->attrs-alist :children HASH
+;; netid->child-network-id).
+(defvar clatter-soju--controls (make-hash-table :test 'equal)
+  "Map of control connection network-id to its fan-out state.")
+
+(defun clatter-soju--state (network-id)
+  "Return (creating if needed) the fan-out state for control NETWORK-ID."
+  (or (gethash network-id clatter-soju--controls)
+      (let ((state (list :networks (make-hash-table :test 'equal)
+                         :children (make-hash-table :test 'equal))))
+        (puthash network-id state clatter-soju--controls)
+        state)))
+
+(defun clatter-soju--control-config (conn)
+  "Return the effective config plist for the control connection CONN.
+Prefer the live process config (honoring `clatter-connect' overrides);
+fall back to the saved `clatter-networks' entry."
+  (or (and-let* ((proc (clatter-connection-process conn))
+                 ((processp proc)))
+        (process-get proc :clatter-config))
+      (cdr (assoc (clatter-connection-network-id conn)
+                  clatter-networks #'equal))))
+
+;; --- BOUNCER NETWORK parsing ---
+
+(defun clatter-soju--parse-attrs (attrs-string)
+  "Parse a BOUNCER NETWORK ATTRS-STRING into an alist of (key . value).
+Attributes use IRCv3 message-tag format (`name=libera;state=connected'),
+so `clatter-parse-tags' handles the `;' splitting and `\\s'/`\\:' unescaping."
+  (when attrs-string
+    (clatter-parse-tags attrs-string)))
+
+(defun clatter-soju--on-bouncer (conn subcommand params)
+  "Handle a BOUNCER command on CONN.
+SUBCOMMAND is the BOUNCER subcommand; PARAMS is the list after it.
+Only `NETWORK' notifications are interesting: they carry
+`<netid> <attributes>' (or `<netid> *' for a removal)."
+  (when (string-equal subcommand "NETWORK")
+    (let ((netid (nth 0 params))
+          (attrs (nth 1 params))
+          (state (clatter-soju--state (clatter-connection-network-id conn))))
+      (if (string-equal attrs "*")
+          ;; Removal notification: drop the network and (best-effort) its child.
+          (remhash netid (plist-get state :networks))
+        (puthash netid (clatter-soju--parse-attrs attrs)
+                 (plist-get state :networks))))))
+
+;; --- Fan-out ---
+
+(defun clatter-soju--child-id (netid attrs)
+  "Return the clatter network-id to use for a child bound to NETID.
+Prefer the network's `name' attribute; fall back to the netid."
+  (or (cdr (assoc "name" attrs #'string=)) netid))
+
+(defun clatter-soju--fan-out-args (control-config attrs child-id)
+  "Return the `clatter-connect' keyword plist for a child of CONTROL-CONFIG.
+ATTRS is the network's parsed attributes; CHILD-ID the clatter network-id
+to use (the network's `name').  The child connects to the same bouncer
+endpoint as the control connection and routes to the upstream via the
+\"<bouncer-user>/<network-name>\" username form, so Soju binds it to that
+network without any `BOUNCER BIND'.  It inherits `:bouncer t' (skip
+NickServ/reclaim) and the bouncer credentials, and deliberately omits
+`:autojoin' (Soju replays saved JOINs upstream-side)."
+  (let* ((bouncer-user (or (plist-get control-config :username)
+                           (plist-get control-config :nick)))
+         (nick (or (cdr (assoc "nickname" attrs #'string=))
+                   (plist-get control-config :nick)))
+         (args (list :server (plist-get control-config :server)
+                     :tls (plist-get control-config :tls)
+                     :nick nick
+                     :username (format "%s/%s" bouncer-user child-id)
+                     :bouncer t)))
+    (dolist (key '(:port :password :sasl :client-cert :proxy :tor))
+      (when (plist-member control-config key)
+        (setq args (plist-put args key (plist-get control-config key)))))
+    args))
+
+(defun clatter-soju--fan-out (conn)
+  "Spawn bound child connections for every network stashed for CONN.
+Idempotent across reconnects: netids already spawned are skipped."
+  (let* ((network-id (clatter-connection-network-id conn))
+         (state (clatter-soju--state network-id))
+         (networks (plist-get state :networks))
+         (children (plist-get state :children))
+         (control-config (clatter-soju--control-config conn)))
+    (unless control-config
+      (clatter--debug "soju: no control config for %s; skipping fan-out"
+                      network-id))
+    (when control-config
+      (maphash
+       (lambda (netid attrs)
+         (if (gethash netid children)
+             (clatter--debug "soju: %s already connected via %s; skipping"
+                             netid (gethash netid children))
+           (let* ((child-id (clatter-soju--child-id netid attrs))
+                  (args (clatter-soju--fan-out-args
+                         control-config attrs child-id)))
+             (puthash netid child-id children)
+             (clatter--debug "soju: fanning out %s -> %s" netid child-id)
+             (apply #'clatter-connect child-id args))))
+       networks))))
+
+(defun clatter-soju--on-batch-complete (conn batch-type _target _messages)
+  "Fan out when CONN completes a `soju.im/bouncer-networks' batch."
+  (when (string-equal batch-type "soju.im/bouncer-networks")
+    (clatter-soju--fan-out conn)))
+
+;; --- Enable / disable ---
+
+(defun clatter-soju-enable ()
+  "Install the Soju bouncer-networks hooks."
+  (add-hook 'clatter-bouncer-hook #'clatter-soju--on-bouncer)
+  (add-hook 'clatter-batch-complete-hook #'clatter-soju--on-batch-complete))
+
+(defun clatter-soju-disable ()
+  "Remove the Soju bouncer-networks hooks."
+  (remove-hook 'clatter-bouncer-hook #'clatter-soju--on-bouncer)
+  (remove-hook 'clatter-batch-complete-hook #'clatter-soju--on-batch-complete))
+
+(provide 'clatter-soju)
+
+;;; clatter-soju.el ends here
