@@ -195,11 +195,22 @@ FILE is stored for flushing."
 (defun clatter-log--on-notice (conn sender target text server-time)
   "Log NOTICE from SENDER to TARGET on CONN."
   (let* ((network (clatter-connection-network-id conn))
-         (sender-nick (or (clatter-prefix-nick sender) "*"))
-         (log-target (if (or (string= target "*")
-                             (not (clatter-channel-name-p target)))
-                         (if clatter-log-server-buffer "*server*" nil)
-                       target)))
+         (my-nick (clatter-connection-nick conn))
+         (real-sender-nick (clatter-prefix-nick sender))
+         (sender-nick (or real-sender-nick "*"))
+         ;; A query NOTICE (target is our nick, from a real user with a
+         ;; nick!user@host prefix) logs to the query log keyed by the sender,
+         ;; mirroring `clatter-log--on-privmsg'.  Channel notices log to the
+         ;; channel; everything else (server notices, "*" targets) logs to
+         ;; the server buffer when enabled.
+         (user-prefix-p (and (cadr sender) (caddr sender)))
+         (to-me (and user-prefix-p
+                     (not (clatter-channel-name-p target))
+                     (string-equal target my-nick)))
+         (log-target (cond
+                      (to-me real-sender-nick)
+                      ((clatter-channel-name-p target) target)
+                      (clatter-log-server-buffer "*server*"))))
     (when log-target
       (clatter-log--write network log-target
                           (format "-%s- %s" sender-nick text)

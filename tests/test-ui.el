@@ -235,6 +235,51 @@
                                  "echo" nil))
       (should (clatter-get-buffer "testnet" "[NICK"))
       (should-not popped))))
+;; --- Query NOTICE routing ---
+
+(ert-deftest clatter-test-notice-dm-routes-to-query-buffer ()
+  "A query NOTICE from a user lands in that user's query buffer."
+  (clatter-test-with-ui-connection conn
+    ;; Pre-create the query buffer so we can assert the NOTICE lands there
+    ;; rather than creating a server buffer.
+    (let ((query (clatter-get-or-create-buffer "testnet" "alice")))
+      (clatter-ui-setup-buffer-if-needed query)
+      (clatter-ui--on-notice conn '("alice" "user" "host") "testnick" "beep" nil)
+      (should (eq (clatter-get-buffer "testnet" "alice") query))
+      (should (eq 'query (buffer-local-value 'clatter--buffer-type query)))
+      (should (string-match-p "beep"
+                              (with-current-buffer query (buffer-string))))
+      ;; A query NOTICE must not create or touch the server buffer.
+      (should-not (clatter-get-server-buffer "testnet")))))
+
+(ert-deftest clatter-test-notice-dm-creates-query-buffer ()
+  "A query NOTICE from a new correspondent creates its query buffer on demand."
+  (clatter-test-with-ui-connection conn
+    (should-not (clatter-get-buffer "testnet" "bob"))
+    (clatter-ui--on-notice conn '("bob" "user" "host") "testnick" "hi" nil)
+    (let ((buf (clatter-get-buffer "testnet" "bob")))
+      (should buf)
+      (should (eq 'query (buffer-local-value 'clatter--buffer-type buf)))
+      (should-not (clatter-get-server-buffer "testnet")))))
+
+(ert-deftest clatter-test-notice-server-notice-routes-to-server-buffer ()
+  "A NOTICE from a bare server name (no user/host) lands in the server buffer."
+  (clatter-test-with-ui-connection conn
+    (clatter-ui--on-notice conn '("irc.example" nil nil) "testnick" "server says hi" nil)
+    (let ((server (clatter-get-server-buffer "testnet")))
+      (should server)
+      (should (eq 'server (buffer-local-value 'clatter--buffer-type server)))
+      ;; No query buffer named after the server should be created.
+      (should-not (clatter-get-buffer "testnet" "irc.example")))))
+
+(ert-deftest clatter-test-notice-channel-notice-routes-to-channel ()
+  "A channel NOTICE lands in the channel buffer, not the server buffer."
+  (clatter-test-with-ui-connection conn
+    (let ((chan (clatter-get-or-create-buffer "testnet" "#chan")))
+      (clatter-ui-setup-buffer-if-needed chan)
+      (clatter-ui--on-notice conn '("alice" "user" "host") "#chan" "chan notice" nil)
+      (should (eq (clatter-get-buffer "testnet" "#chan") chan))
+      (should-not (clatter-get-server-buffer "testnet")))))
 ;; --- Self echo ---
 
 (ert-deftest clatter-test-optimistic-self-echo-reconciles-server-metadata ()

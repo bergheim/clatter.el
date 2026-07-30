@@ -1749,10 +1749,25 @@ the buffer margin-width variables."
   "Display SENDER's NOTICE TEXT to TARGET on CONN."
   (let* ((network (clatter-connection-network-id conn))
          (my-nick (clatter-connection-nick conn))
-         (sender-nick (or (clatter-prefix-nick sender) "*"))
-         (buf (or (clatter-get-buffer network target)
-                  (clatter-get-server-buffer network)
-                  (clatter-get-or-create-buffer network "*server*" 'server)))
+         (isupport (clatter-connection-isupport conn))
+         (case-mapping (and isupport (gethash "CASEMAPPING" isupport)))
+         (real-sender-nick (clatter-prefix-nick sender))
+         (sender-nick (or real-sender-nick "*"))
+         ;; A NOTICE addressed to our own nick from a real user (a
+         ;; nick!user@host prefix, not a bare server name) is a query NOTICE:
+         ;; route it to (or create) the query buffer keyed by the sender's
+         ;; nick, mirroring `clatter-ui--on-privmsg'.  Server notices (a
+         ;; servername prefix) and channel notices keep the legacy
+         ;; server-buffer/channel-buffer fallback.
+         (user-prefix-p (and (cadr sender) (caddr sender)))
+         (to-me (and (not (clatter-channel-name-p target))
+                     user-prefix-p
+                     (clatter-nick-equal-p target my-nick case-mapping)))
+         (buf (if to-me
+                  (clatter-get-or-create-buffer network real-sender-nick)
+                (or (clatter-get-buffer network target)
+                    (clatter-get-server-buffer network)
+                    (clatter-get-or-create-buffer network "*server*" 'server))))
          (is-muted (clatter-muted-p sender network))
          (invisible (clatter-sender-invisibility sender network)))
     (clatter-ui-setup-buffer-if-needed buf)
