@@ -443,6 +443,27 @@ Set to nil to disable truncation."
   :type '(choice integer (const nil))
   :group 'clatter)
 
+(defcustom clatter-buffer-name-style 'full
+  "How to name clatter buffers.
+Controls the format returned by `clatter-buffer-name' for the
+per-target buffers created by clatter.  Possible values:
+
+  full     `*clatter:NETWORK/TARGET*' (the default): every buffer
+           is prefixed with `clatter:' and its network, so buffers
+           are unambiguous and group together in buffer lists.
+  network  `*NETWORK/TARGET*': drop the `clatter:' prefix but keep
+           the network qualifier.
+  channel  `TARGET' (for example `#foo'): use only the target name,
+           with no `clatter:'/network prefix and no surrounding
+           asterisks.  Reads as a bare channel or nick name, but
+           note that the same channel or nick on two networks would
+           collide into one buffer name; prefer this only when you
+           connect to a single network."
+  :type '(choice (const :tag "*clatter:NETWORK/TARGET*" full)
+                 (const :tag "*NETWORK/TARGET*" network)
+                 (const :tag "TARGET (e.g. #foo)" channel))
+  :group 'clatter)
+
 (defcustom clatter-suppress-messages '(muted)
   "Default message types hidden in new channel buffers.
 Valid values: join, part, quit, nick, mode, away, kick, topic.

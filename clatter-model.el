@@ -25,8 +25,12 @@
 
 (defun clatter-buffer-name (network target)
   "Generate buffer name for NETWORK and TARGET (channel or nick).
-Server buffers use TARGET \"*server*\"."
-  (format "*clatter:%s/%s*" network target))
+Server buffers use TARGET \"*server*\".  The format is governed by
+`clatter-buffer-name-style'."
+  (pcase clatter-buffer-name-style
+    ('network (format "*%s/%s*" network target))
+    ('channel target)
+    (_ (format "*clatter:%s/%s*" network target))))
 
 (defun clatter-server-buffer-name (network)
   "Generate server buffer name for NETWORK."
