@@ -132,10 +132,6 @@ PARAMS format: (target timestamp=TIMESTAMP)"
               (delete-overlay clatter-read-marker--overlay)
               (setq clatter-read-marker--overlay nil))))))))
 
-(defun clatter-read-marker--on-buffer-switch ()
-  "Send MARKREAD for the current buffer."
-  (clatter-read-marker--mark-buffer-read (current-buffer)))
-
 ;; --- Track msgids ---
 
 (defun clatter-read-marker--target-buffer (conn sender target)
