@@ -60,7 +60,7 @@ Fool messages are still displayed with the `clatter-fool' face."
   :group 'clatter)
 
 (defface clatter-fool
-  '((t :inherit shadow))
+  '((t :inherit font-lock-doc-face))
   "Face used to dim messages from fools."
   :group 'clatter)
 

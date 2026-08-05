@@ -29,12 +29,12 @@
 (defvar-local clatter--last-formatted-timestamp nil
   "Last formatted message timestamp in the current Clatter buffer.")
 
-;; Clatter faces inherit from standard theme faces (font-lock-*, shadow,
+;; Clatter faces inherit from standard theme faces (font-lock-*,
 ;; error, success) rather than hardcoding hex colors, so they stay legible
 ;; across light and dark Emacs themes and adapt automatically on `load-theme'.
 
 (defface clatter-timestamp
-  '((t :inherit shadow))
+  '((t :inherit font-lock-doc-face))
   "Face for message timestamps."
   :group 'clatter)
 
@@ -647,8 +647,8 @@ SERVER-TIME overrides the current time for the timestamp."
                               (front-nick (if (eq 'action ref-msg-type)
                                               (format "* %s" ref-sender)
                                             (format "%s:" ref-sender)))
-                              (front (propertize (format "↳ %s " front-nick) 'face 'shadow)))
-                         (add-face-text-property 0 (length preview) 'shadow nil preview)
+                              (front (propertize (format "↳ %s " front-nick) 'face 'font-lock-doc-face)))
+                         (add-face-text-property 0 (length preview) 'font-lock-doc-face nil preview)
                          (let ((context (concat front preview))
                                (action
                                 (lambda (_button)
@@ -2253,7 +2253,7 @@ Renders a visual separator before and after history playback."
       (let* ((sep-text (propertize
                         (concat " " (make-string 30 ?-) " history "
                                 (make-string 30 ?-) " ")
-                        'face 'shadow))
+                        'face 'font-lock-doc-face))
              (count (length messages)))
         (clatter--insert-message buf sep-text t)
         ;; Insert each message with dimmed style.  Suppress inline image
@@ -2275,7 +2275,7 @@ Renders a visual separator before and after history playback."
                              (make-string 20 ?-)
                              count
                              (make-string 20 ?-))
-                     'face 'shadow)
+                     'face 'font-lock-doc-face)
          t)))))
 
 ;; --- CTCP replies ---
@@ -2385,7 +2385,7 @@ Shows sender info when point is on a message."
                (concat sender
                        (when msgid (format "  [msgid: %s]" msgid)))
                :thing "message"
-               :face 'shadow)))
+               :face 'font-lock-doc-face)))
     nil))
 
 (defun clatter-ui--channel-at-point ()
@@ -2470,7 +2470,7 @@ STATE is \"active\", \"paused\", or \"done\"."
                  (2 (format "%s and %s are typing" (car nicks) (cadr nicks)))
                  (_ (format "%d people typing" (length nicks))))
                "...")
-       'face 'shadow))))
+       'face 'font-lock-doc-face))))
 
 ;; --- Outbound typing notifications ---
 

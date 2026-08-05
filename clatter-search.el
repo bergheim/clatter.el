@@ -41,7 +41,7 @@
   :group 'clatter)
 
 (defface clatter-search-timestamp
-  '((t :inherit shadow))
+  '((t :inherit font-lock-doc-face))
   "Face for timestamps in search results."
   :group 'clatter)
 

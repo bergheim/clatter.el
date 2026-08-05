@@ -49,7 +49,7 @@ When non-nil, all IRC traffic is logged to rawlog buffers."
   :group 'clatter)
 
 (defface clatter-rawlog-timestamp
-  '((t :inherit shadow))
+  '((t :inherit font-lock-doc-face))
   "Face for timestamps in rawlog."
   :group 'clatter)
 

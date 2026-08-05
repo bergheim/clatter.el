@@ -137,7 +137,7 @@ so the crumbs appear everywhere.  Setting this through Customize or
   :group 'clatter)
 
 (defface clatter-track-muted
-  '((t :inherit shadow))
+  '((t :inherit font-lock-doc-face))
   "Face for muted channels with activity."
   :group 'clatter)
 

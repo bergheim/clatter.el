@@ -67,7 +67,7 @@
     (insert (propertize (format " %d members\n"
                                 (length nicks))
                         'face 'bold))
-    (insert (propertize (make-string (1- clatter-nicklist-width) ?-) 'face 'shadow)
+    (insert (propertize (make-string (1- clatter-nicklist-width) ?-) 'face 'font-lock-doc-face)
             "\n")
     ;; Display sorted nicks by rank
     (setq nicks
