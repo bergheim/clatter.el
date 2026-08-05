@@ -156,13 +156,15 @@ reloads; call with a prefix arg to refresh them after changing the palette."
          ;; New face: declare it so it is themeable and shows up in Customize.
          ((not (facep face))
           (custom-declare-face
-           face `((t (:inherit ,base :weight bold)))
+           ;; :slant normal prevents italic leaking in from italic base
+           ;; faces (font-lock-string-face, font-lock-doc-face, etc.).
+           face `((t (:inherit ,base :weight bold :slant normal)))
            (format "Clatter nick highlight color %d (inherits %s)." idx base)
            :group 'clatter))
          ;; Existing face: only overwrite when explicitly forced, so user or
          ;; theme customizations survive normal reloads.
          (force
-          (set-face-attribute face nil :inherit base :weight 'bold))))
+          (set-face-attribute face nil :inherit base :weight 'bold :slant 'normal))))
       (setq idx (1+ idx)))))
 
 (defun clatter-hl-nick-face-symbol (nick)
