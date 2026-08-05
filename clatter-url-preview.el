@@ -21,6 +21,13 @@
 
 ;; --- Configuration ---
 
+(defface clatter-url-preview-title
+  '((t :inherit font-lock-builtin-face :slant italic))
+  "Face for the title line of a rendered link preview.
+Inherits from a standard theme face so it stays legible on light and
+dark themes."
+  :group 'clatter)
+
 (defcustom clatter-url-preview-enable nil
   "Enable automatic URL title preview."
   :type 'boolean
@@ -145,7 +152,7 @@ No text is inserted if truncation or deletion has removed the source message."
           (save-excursion
             (goto-char (clatter-url-preview--anchor-tail anchor))
             (insert (propertize (format "↳ %s\n" title)
-                                'face '(:foreground "#89ddff" :slant italic)
+                                'face 'clatter-url-preview-title
                                 'read-only t
                                 'front-sticky t
                                 'line-prefix prefix
@@ -162,7 +169,7 @@ No text is inserted if truncation or deletion has removed the source message."
         (save-excursion
           (goto-char anchor)
           (insert (propertize (format "↳ %s\n" title)
-                              'face '(:foreground "#89ddff" :slant italic)
+                              'face 'clatter-url-preview-title
                               'read-only t
                               'front-sticky t
                               'line-prefix prefix
