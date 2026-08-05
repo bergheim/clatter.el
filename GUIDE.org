@@ -1,56 +1,55 @@
 #+TITLE: clatter.el User Guide
 #+AUTHOR: Glenn Thompson
 #+STARTUP: showall
+#+OPTIONS: toc:3
 
-* Prerequisites
+This is the full reference. For installation, requirements and copy-paste
+starting configurations, see [[file:README.org][README.org]].
 
-- **Emacs 30.1+** (built with GnuTLS support)
-- **GnuTLS** is required for TLS/SSL connections to IRC servers
+Every option below is a =defcustom= in the =clatter= group. The tables here are
+curated - they cover what you are likely to change. For the complete list,
+including internals not documented here, use:
 
-To verify GnuTLS is available, evaluate:
+#+begin_src
+M-x customize-group RET clatter RET
+#+end_src
+
+* Getting Started
+
+** Prerequisites
+
+Emacs 30.1 or later, built with GnuTLS. Verify with:
 
 #+begin_src emacs-lisp
 (gnutls-available-p)  ;; should return t
 #+end_src
 
-If it returns =nil=, install GnuTLS and rebuild Emacs:
-
-| OS               | Package                                |
-|------------------+----------------------------------------|
-| Debian/Ubuntu    | =apt install gnutls-bin libgnutls28-dev= |
-| Fedora/RHEL      | =dnf install gnutls=                     |
-| Arch             | =pacman -S gnutls=                       |
-| macOS (Homebrew) | =brew install gnutls=                    |
-
-Most modern Emacs builds include GnuTLS support by default.
-
-* Quick Start
+=curl= is needed at runtime for URL title and image fetching. See
+[[file:README.org][README.org]] for per-platform install commands.
 
 ** Minimal Configuration
 
 #+begin_src emacs-lisp
-(add-to-list 'load-path (expand-file-name "~/SourceCode/clatter.el"))
+(add-to-list 'load-path "~/path/to/clatter.el")  ; not needed if installed from MELPA
 (require 'clatter)
 
 (setopt clatter-networks
-       '(("libera"
-          :server "irc.libera.chat"
-          :port 6697
-          :tls t
-          :nick "yournick"
-          :sasl plain
-          :autojoin ("#emacs" "#lisp"))))
+        '(("libera"
+           :server "irc.libera.chat"
+           :port 6697
+           :tls t
+           :nick "yournick"
+           :sasl plain
+           :autojoin ("#emacs" "#lisp"))))
 
 ;; Loading clatter has no side effects: it installs no global hooks and
 ;; enables no extras.  Call clatter-setup once to wire everything up.
 (clatter-setup)
 #+end_src
 
-Note: ~clatter-setup~ is required.  Without it the optional features
-(activity tracking, notifications, chathistory, read markers, logging,
-URL previews) are not enabled and no exit/disconnect cleanup hooks are
-installed.  To leave a particular extra off, set its user option to ~nil~
-before calling ~clatter-setup~, for example:
+=clatter-setup= is required. Without it the bundled extras are not enabled and
+no exit/disconnect cleanup hooks are installed. Each extra is gated by its own
+option, so change anything you want /before/ calling it:
 
 #+begin_src emacs-lisp
 (setopt clatter-notify-enabled nil   ; no desktop notifications
@@ -58,28 +57,240 @@ before calling ~clatter-setup~, for example:
 (clatter-setup)
 #+end_src
 
+See [[*Modules][Modules]] for which extras are gated by which option.
+
 ** Connecting
 
-- =M-x clatter= - connect to a network (prompts for selection)
-- =M-x clatter-quick-connect= - connect to server/port/nick directly
-- =M-x clatter-disconnect= - disconnect from a network
-- =M-x clatter-status= - show connection status
+| Command                   | Description                                  |
+|---------------------------+----------------------------------------------|
+| =M-x clatter=               | Connect to a network from =clatter-networks=   |
+| =M-x clatter-quick-connect= | Connect to a server/port/nick directly       |
+| =M-x clatter-disconnect=    | Disconnect from a network                    |
+| =M-x clatter-status=        | Show state, nick and cap count per connection |
 
-** Passwords
+* Network Configuration
 
-Clatter uses =auth-source= by default. Add to =~/.authinfo.gpg=:
+** clatter-networks
+
+Each entry is a network name followed by a plist:
+
+#+begin_src emacs-lisp
+(setopt clatter-networks
+        '(("NAME" :server "host" :nick "nick" ...)))
+#+end_src
+
+| Key            | Default                    | Description                                                     |
+|----------------+----------------------------+-----------------------------------------------------------------|
+| =:server=        | -                          | Server hostname. The only strictly required key                 |
+| =:port=          | =clatter-default-port= (6697) | Server port                                                     |
+| =:tls=           | =clatter-default-tls= (t)    | Use TLS. An explicit =nil= is honoured                            |
+| =:nick=          | =clatter-default-nick=       | Nickname                                                        |
+| =:username=      | the nick                   | Username; also the SASL authcid (see [[*Bouncers (soju)][Bouncers]])              |
+| =:realname=      | ="clatter.el user"=          | Real name. Note: this is /not/ the nick                          |
+| =:sasl=          | =nil=                        | =plain=, =scram-sha-256= or =external=                                |
+| =:client-cert=   | =nil=                        | Path to a client certificate, for SASL EXTERNAL / CertFP        |
+| =:password=      | auth-source lookup         | Server password. Overrides auth-source when set                 |
+| =:autojoin=      | =nil=                        | List of channels to join on connect                             |
+| =:bouncer=       | =nil=                        | Connection is to a bouncer (see [[*Bouncers (soju)][Bouncers]])                     |
+| =:proxy=         | =clatter-proxy=              | SOCKS5 proxy plist (see [[*SOCKS5 and Tor][SOCKS5 and Tor]])                       |
+| =:tor=           | =nil=                        | Shorthand for Tor's local SOCKS5 proxy (127.0.0.1:9050)         |
+
+=:autojoin= is also updated at runtime by the =/autojoin= command, which
+persists it with =customize-save-variable=.
+
+** Passwords and auth-source
+
+With =clatter-use-auth-source= non-nil (the default), clatter looks up the
+password rather than storing it in your config. The lookup tries each
+combination of:
+
+| Field     | Values tried, in order                                      |
+|-----------+-------------------------------------------------------------|
+| =machine=   | the clatter network name, then the =:server= hostname         |
+| =port=      | the configured =:port= (or 6697), then the literal =irc=        |
+| =login=     | the =:nick= (or =clatter-default-nick=)                         |
+
+So either of these works for the =libera= network above:
 
 #+begin_example
-machine irc.libera.chat login yournick password yourpassword
+machine irc.libera.chat login yournick port 6697 password yourpassword
+machine libera          login yournick port irc  password yourpassword
 #+end_example
 
-Set =clatter-use-auth-source= to =nil= to disable.
+Two things to watch:
+
+- =login= is matched against your *nick*, but SASL sends =:username= as the
+  authentication identity. For a direct connection those are usually the same;
+  for a bouncer they are not.
+- A =:password= in the network config always wins over auth-source.
+
+The resolved password is used for the server =PASS= line, for SASL PLAIN and
+SCRAM, and for NickServ =IDENTIFY= when =clatter-auto-identify= is on.
+
+Set =clatter-use-auth-source= to =nil= to disable lookups entirely.
+
+** SASL
+
+| Mechanism       | =:sasl= value    | Requires                                     |
+|-----------------+----------------+----------------------------------------------|
+| PLAIN           | =plain=          | A resolvable password                        |
+| SCRAM-SHA-256   | =scram-sha-256=  | A resolvable password; RFC 5802, never sends it |
+| EXTERNAL        | =external=       | =:client-cert= pointing at an existing file    |
+
+Clatter only requests the =sasl= capability when the prerequisite is actually
+present, so a typo in a certificate path silently means no SASL rather than a
+failed handshake. Two behaviours worth knowing:
+
+- *SASL failure is not fatal.* On numeric 904/905/906 clatter reports the
+  failure and finishes registration unauthenticated. If you end up connected
+  but not identified, check the server buffer.
+- *A SCRAM server-signature mismatch is logged, not enforced.* The message
+  reads =SCRAM: server signature INVALID (possible MITM)= and the connection
+  continues. Treat it as a reason to investigate.
+
+*** SASL EXTERNAL (CertFP)
+
+Certificate authentication avoids sending a password at all. Generate a
+self-signed certificate with the key and certificate in one file:
+
+#+begin_src sh
+mkdir -p ~/.emacs.d/clatter
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+    -keyout ~/.emacs.d/clatter/irc.pem \
+    -out    ~/.emacs.d/clatter/irc.pem \
+    -subj "/CN=yournick"
+chmod 600 ~/.emacs.d/clatter/irc.pem
+#+end_src
+
+Point the network at it and select the mechanism:
+
+#+begin_src emacs-lisp
+(setopt clatter-networks
+        '(("libera"
+           :server "irc.libera.chat" :port 6697 :tls t
+           :nick "yournick"
+           :sasl external
+           :client-cert "~/.emacs.d/clatter/irc.pem"
+           :autojoin ("#emacs"))))
+#+end_src
+
+Connect once with your password still configured, then register the
+certificate fingerprint with the network's services:
+
+#+begin_src
+/ns CERT ADD
+#+end_src
+
+=/ns CERT LIST= shows the registered fingerprints. Once it is listed you can
+drop the password from auth-source. The same file is used as both certificate
+and key, and it is also what CertFP-based channel access uses.
+
+To present one certificate on every configured network without repeating the
+key, inject it in your =:config= block:
+
+#+begin_src emacs-lisp
+(mapc (lambda (network)
+        (setf (cdr network)
+              (plist-put (cdr network) :client-cert
+                         (file-name-concat user-emacs-directory
+                                           "clatter" "irc.pem"))))
+      clatter-networks)
+#+end_src
+
+** Bouncers (soju)
+
+=:bouncer t= tells clatter that the connection terminates at a bouncer rather
+than at the network itself. It has two effects regardless of which bouncer you
+use: NickServ auto-identify is skipped (the password authenticates you to the
+bouncer, not to services) and nick reclaim is skipped (the bouncer legitimately
+holds your nick).
+
+What happens next depends on the shape of =:username=:
+
+| =:username=            | Behaviour                                                |
+|----------------------+----------------------------------------------------------|
+| bare, e.g. ="me"       | *Control connection*: fans out one child per network      |
+| ="me/libera"           | *Single network*: binds to that upstream, no fan-out      |
+
+*** Fan-out
+
+With a bare username, clatter negotiates =soju.im/bouncer-networks=, sends
+=BOUNCER LISTNETWORKS=, and spawns a child connection for every upstream
+network the bouncer reports. Each child is an ordinary clatter network with its
+own buffers, nick list and chat history, named after the soju network name.
+
+#+begin_src emacs-lisp
+(setopt clatter-networks
+        '(("soju"
+           :server "soju.example.com" :port 6697 :tls t
+           :nick "yournick"
+           :username "sojuuser"
+           :sasl plain
+           :bouncer t)))
+#+end_src
+
+Children route to their upstream via the ="sojuuser/<network>"= username form,
+so no =BOUNCER BIND= is needed. They inherit =:port=, =:password=, =:sasl=,
+=:client-cert=, =:proxy= and =:tor= from the control entry. They deliberately do
+*not* inherit =:autojoin= - soju replays your saved JOINs upstream-side - or
+=:realname=. Dead children are re-spawned when the control connection
+reconnects; live ones are left alone.
+
+Set =clatter-soju-enabled= to =nil= to turn fan-out off; a =:bouncer t= entry then
+behaves as a plain single connection.
+
+*** Backlog
+
+The defaults are already what you want with a bouncer:
+=clatter-chathistory-enabled=, =clatter-chathistory-on-join= and
+=clatter-chathistory-on-reconnect= are all on, and clatter requests
+=CHATHISTORY LATEST= on first join and =CHATHISTORY AFTER= on rejoin.
+
+If your bouncer does not implement IRCv3 =read-marker=, =clatter-read-state-enabled=
+(on by default) persists last-read timestamps locally as a fallback.
+
+** SOCKS5 and Tor
+
+Route a connection through any SOCKS5 proxy (RFC 1928), including Tor:
+
+#+begin_src emacs-lisp
+(setopt clatter-networks
+        '(("libera-tor"
+           :server "irc.libera.chat" :port 6697 :tls t :nick "yournick"
+           :tor t)))                 ;; or :proxy (:type socks5 :host "..." :port 1080)
+#+end_src
+
+=:tor t= is shorthand for =(:type socks5 :host "127.0.0.1" :port 9050)=. Resolution
+order is per-network =:proxy=, then =:tor=, then the global =clatter-proxy=.
+
+- *Remote DNS.* The proxy always resolves the target hostname, so DNS is not
+  leaked and =.onion= addresses work.
+- *Fail-closed.* If the handshake fails, clatter does not fall back to a direct
+  connection.
+- *Requires builtin TLS.* Combining a proxy with =clatter-tls-method= set to
+  =external= is a hard error. External-TLS users can wrap Emacs with =torsocks=
+  at the OS level instead.
+- Username/password auth (RFC 1929) is supported; the password comes from the
+  proxy plist's =:pass= or from auth-source keyed on the proxy host.
+
+** Strict Transport Security
+
+| Variable                | Default                            | Description         |
+|-------------------------+------------------------------------+---------------------|
+| =clatter-sts-enable=      | =t=                                  | Honour STS upgrades |
+| =clatter-sts-policy-file= | =~/.emacs.d/clatter/sts-policies.el= | Cached policies     |
+
+When a server advertises an STS policy, clatter caches it and upgrades future
+plaintext connections to TLS automatically. A cached policy overrides =:tls nil=
+at connect time and replaces the configured port with the policy port, so a
+network you deliberately want in plaintext may still come up over TLS. Check
+the rawlog if a connection lands on an unexpected port.
 
 * Command Reference
 
 All commands are typed in the input area prefixed with =/=.
 
-** Connection & Navigation
+** Connection and Navigation
 
 | Command        | Aliases | Description                                                               |
 |----------------+---------+---------------------------------------------------------------------------|
@@ -91,10 +302,9 @@ All commands are typed in the input area prefixed with =/=.
 | =/buffers=       |         | List all open buffers                                                     |
 | =/list [filter]= |         | Open interactive channel list browser (optional server filter, e.g. =>100=) |
 
-Killing a clatter buffer the normal way (=C-x k=, ibuffer, etc.) now
-tears it down cleanly without needing =/close= or =/quit=: killing a
-channel buffer parts the channel, and killing a server buffer
-disconnects that network.
+Killing a clatter buffer the normal way (=C-x k=, ibuffer, etc.) tears it down
+cleanly without needing =/close= or =/quit=: killing a channel buffer parts the
+channel, and killing a server buffer disconnects that network.
 
 ** Messaging
 
@@ -109,20 +319,19 @@ disconnects that network.
 
 *** Selecting a message for /reply and /react
 
-Both =/reply= and =/react= act on the message in the *secondary
-selection*, not on the message at point. Select a message first, then
-type the command in the input area:
+Both =/reply= and =/react= act on the message in the *secondary selection*, not
+on the message at point. Select a message first, then type the command in the
+input area:
 
 - Drag over a message with =M-<mouse-1>= (the standard Emacs secondary
   selection), or
-- Put point on a message and run =M-x clatter-select-message= (also
-  reachable from the message action menu, =C-c C-a=), which copies that
-  message into the secondary selection.
+- Put point on a message and run =M-x clatter-select-message= (also reachable
+  from the message action menu, =C-c C-a=), which copies that message into the
+  secondary selection.
 
-The selection is "sticky": it persists until you replace it, so you can
-fire several reactions at the same message. Clatter clears it
-automatically after a =/reply=. If nothing is selected, clatter prompts
-you to select a message first.
+The selection is "sticky": it persists until you replace it, so you can fire
+several reactions at the same message. Clatter clears it automatically after a
+=/reply=. If nothing is selected, clatter prompts you to select a message first.
 
 ** Channel Management
 
@@ -136,6 +345,23 @@ you to select a message first.
 | =/nick newnick=       | Change your nickname                   |
 | =/away [message]=     | Set or clear away status               |
 
+** Services and Nick Recovery
+
+| Command         | Description                                         |
+|-----------------+-----------------------------------------------------|
+| =/ns command=     | Send command to NickServ                            |
+| =/cs command=     | Send command to ChanServ                            |
+| =/whois [nick]=   | Query WHOIS information (defaults to your own nick) |
+| =/ghost [nick]=   | Kill a ghost session holding your nick              |
+| =/regain [nick]=  | Reclaim a nick via services and rename to it        |
+| =/reclaim on= / =/reclaim off= | Turn automatic nick reclaim on or off        |
+| =/monitor + nick= | Add nick to MONITOR watchlist                       |
+| =/monitor - nick= | Remove nick from MONITOR                            |
+| =/raw line=       | Send raw IRC protocol line                          |
+
+=/reclaim= with no argument reports the current state. =/regain= forcibly kills
+whatever session holds the nick, so prefer =/ghost= unless you are sure.
+
 ** Search
 
 | Command           | Aliases      | Description                      |
@@ -143,12 +369,13 @@ you to select a message first.
 | =/search query=     | =/grep=, =/find= | Search all IRC logs              |
 | =/searchhere query= |              | Search current channel logs only |
 
-Also available as =M-x clatter-search=, =M-x clatter-search-channel=,
-and =M-x clatter-search-completing= (completing-read interface).
+Search reads the on-disk logs, so it only finds what channel logging has
+written - see [[*Logging][Logging]]. Also available as =M-x clatter-search=,
+=M-x clatter-search-channel= and =M-x clatter-search-completing= (a
+completing-read interface). With a prefix argument, =/search= prompts for a
+network filter.
 
-With prefix arg (=C-u=), =/search= prompts for a network filter.
-
-** Moderation & Filtering
+** Moderation and Filtering
 
 | Command              | Description                                                   |
 |----------------------+---------------------------------------------------------------|
@@ -160,67 +387,49 @@ With prefix arg (=C-u=), =/search= prompts for a network filter.
 | =/ignore pattern=      | Ignore nick or hostmask (supports * and ?)                    |
 | =/unignore pattern=    | Remove from ignore list                                       |
 | =/ignore=              | Show current ignore list                                      |
-| =/fool nick=           | Dim a nick (hide their messages); no arg shows the list       |
-| =/unfool nick=         | Stop dimming a nick                                           |
-| =/toggle-fools=        | Toggle visibility of all fool messages                        |
-| =/pal nick=            | Highlight a nick as a pal; no arg shows the list              |
+| =/pal nick=            | Highlight a nick as a pal                                     |
 | =/unpal nick=          | Remove a nick from the pals list                              |
+| =/pals=                | Show the pals list                                            |
+| =/fool nick=           | Dim a nick and hide their messages                            |
+| =/unfool nick=         | Stop dimming a nick                                           |
+| =/fools=               | Show the fools list                                           |
+| =/toggle-fools=        | Toggle visibility of all fool messages (alias: =/fools-toggle=)  |
+
+Filtering is UI-only: ignored and fooled messages are still written to the logs.
 
 *** Smart noise filtering
 
-=/suppress all= hides join/part/quit/etc. unconditionally. Smart
-filtering instead hides that noise *only for nicks who are mostly
-noise*. Each nick accumulates a signal-to-noise ratio: "signal" is
-talking (PRIVMSG, notice, topic, reactions) and "noise" is
-join/part/quit/nick/mode/away. When a nick's ratio falls below the
-threshold, their noise lines are hidden, while people who actually talk
-stay fully visible.
+=/suppress all= hides join/part/quit/etc. unconditionally. Smart filtering
+instead hides that noise *only for nicks who are mostly noise*. Each nick
+accumulates a signal-to-noise ratio: "signal" is talking (PRIVMSG, notice,
+topic, reactions) and "noise" is join/part/quit/nick/mode/away. When a nick's
+ratio falls below the threshold, their noise lines are hidden, while people who
+actually talk stay fully visible.
 
-Enable it per buffer:
-
-#+begin_src
-/suppress noise
-#+end_src
-
-Turn it off with =/unsuppress noise=. Suppression is buffer-local, so
-run it in each channel where you want it (it is most useful on busy
-channels like =#emacs=). The ratios build up as messages arrive, so the
-filter gets more accurate the longer a channel stays open.
-
-Tuning:
+Enable it per buffer with =/suppress noise=, turn it off with
+=/unsuppress noise=. Suppression is buffer-local, so run it in each channel
+where you want it (it is most useful on busy channels like =#emacs=). The ratios
+build up as messages arrive, so the filter gets more accurate the longer a
+channel stays open.
 
 | Variable                | Default                    | Description                                                      |
 |-------------------------+----------------------------+------------------------------------------------------------------|
+| =clatter-smart-enabled=   | =t=                          | Apply smart filtering to newly created buffers                   |
 | =clatter-smart-threshold= | =0.5=                        | Hide a nick's noise when its signal/noise ratio drops below this |
 | =clatter-smart-noise=     | =(join part quit nick away)= | Event types that count as noise                                  |
 
 *** Pals and fools
 
-Two complementary nick lists:
+Two complementary nick lists, both matched case-insensitively:
 
-- *Pals* (friends) are highlighted with the =clatter-pal= face wherever
-  their nick appears, so you never miss them: =/pal nick= adds one,
-  =/unpal nick= removes one, and =/pals= shows the list.
-- *Fools* are dimmed with the =clatter-fool= face and hidden by default,
-  much like the ignore list but tracked separately. =/fool nick= adds
-  one, =/unfool nick= removes one, and =/fools= shows the list.
-  Use =/toggle-fools= (or =M-x clatter-toggle-fools=) to show or hide
-  fool messages globally. When visible, fool messages remain dimmed.
-  Set =clatter-fools-visible= to =t= to start with fools shown.
+- *Pals* are highlighted with the =clatter-pal= face wherever their nick
+  appears, so you never miss them.
+- *Fools* are dimmed with the =clatter-fool= face and hidden by default, much
+  like the ignore list but tracked separately. Set =clatter-fools-visible= to =t=
+  to start with fools shown; when visible they remain dimmed.
 
-Both match case-insensitively and can be preset via the =clatter-pals=
-and =clatter-fools= variables.
-
-** Services & Raw
-
-| Command         | Description                   |
-|-----------------+-------------------------------|
-| =/ns command=     | Send command to NickServ      |
-| =/cs command=     | Send command to ChanServ      |
-| =/raw line=       | Send raw IRC protocol line    |
-| =/monitor + nick= | Add nick to MONITOR watchlist |
-| =/monitor - nick= | Remove nick from MONITOR      |
-| =/whois [nick]=    | Query WHOIS information (defaults to your own nick) |
+Both can be preset via =clatter-pals= and =clatter-fools=. Each entry is a nick
+pattern, or a =(PATTERN . NETWORK)= pair to scope it to one network.
 
 ** DCC File Transfer
 
@@ -231,9 +440,10 @@ and =clatter-fools= variables.
 | =/dcc accept [N]=    | Accept a pending DCC transfer      |
 | =/dcc cancel N=      | Cancel a transfer by ID            |
 
-Workflow: join an XDCC channel, search for packs (e.g. =!search query= in #nibl on Rizon),
-then request with =/dcc get BotName #PackNumber=. You will be prompted to accept.
-Files are saved to =~/Downloads/= by default.
+DCC is not enabled by =clatter-setup=; call =(clatter-dcc-setup)= yourself.
+Workflow: join an XDCC channel, search for packs (e.g. =!search query= in #nibl
+on Rizon), then request with =/dcc get BotName #PackNumber=. You will be
+prompted to accept. Files are saved to =~/Downloads/= by default.
 
 ** Autojoin Persistence
 
@@ -243,9 +453,9 @@ Files are saved to =~/Downloads/= by default.
 | =/autojoin remove #channel= | Remove from autojoin and persist       |
 | =/autojoin list=            | Show current autojoin for this network |
 
-If no channel is specified, the current channel is used.
-Changes are persisted via =customize-save-variable= to your
-=custom-file= and also update the live config immediately.
+If no channel is specified, the current channel is used. Changes are persisted
+via =customize-save-variable= to your =custom-file= and also update the live
+config immediately.
 
 ** Utility
 
@@ -253,373 +463,84 @@ Changes are persisted via =customize-save-variable= to your
 |---------+----------------------|
 | =/clear=  | Clear current buffer |
 
-* Configuration Reference
+* Keybindings
 
-** Network Settings
+clatter binds no global keys. Everything is reachable through =M-x= and =/slash=
+commands. The bindings below are local to clatter's own buffers.
 
-| Variable                        | Default           | Description                               |
-|---------------------------------+-------------------+-------------------------------------------|
-| =clatter-networks=                | =nil=               | Network connection list (see Quick Start) |
-| =clatter-default-nick=            | =(user-login-name)= | Default nickname                          |
-| =clatter-default-realname=        | ="clatter.el user"= | Default realname                          |
-| =clatter-default-port=            | =6697=              | Default port                              |
-| =clatter-default-tls=             | =t=                 | Use TLS by default                        |
-| =clatter-use-auth-source=         | =t=                 | Look up passwords via auth-source         |
-| =clatter-reconnect-initial-delay= | =10=                | Seconds before first reconnect            |
-| =clatter-reconnect-max-delay=     | =300=               | Max reconnect delay (exponential backoff) |
-| =clatter-ping-interval=           | =30=                | Seconds between health pings              |
-| =clatter-ping-timeout=            | =120=               | Seconds before ping timeout               |
+** Chat buffers (clatter-mode-map)
 
-** Display
+| Key         | Command                    | Description                        |
+|-------------+----------------------------+------------------------------------|
+| =RET=         | =clatter-send-input=         | Send the current input line        |
+| =TAB=         | =clatter-tab=                | Complete at point, or move forward |
+| =S-TAB=       | =clatter-backtab=            | Move to the previous item          |
+| =M-p=         | =clatter-set-prev-input=     | Older entry from the input history |
+| =M-n=         | =clatter-set-next-input=     | Newer entry from the input history |
+| =C-a=, =Home=   | =clatter-bol=                | Beginning of line                  |
+| =C-c C-a=     | =clatter-action-menu=        | Open the message action menu       |
+| =C-c C-r=     | =clatter-action-reply=       | Reply to the message at point      |
+| =C-c C-e=     | =clatter-action-react=       | React to the message at point      |
+| =C-c C-u=     | =clatter-action-collect-urls= | List every URL in the buffer       |
+| =C-c C-w=     | =clatter-action-whois=       | WHOIS the sender at point          |
 
-| Variable                  | Default      | Description                                                                                                                                                                          |
-|---------------------------+--------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| =clatter-timestamp-format=  | ="%H:%M"=      | Timestamp format string                                                                                                                                                              |
-| =clatter-fill-column=       | =80=           | Fill column for message wrapping                                                                                                                                                     |
-| =clatter-nick-column-width= | =20=           | Width of nick column                                                                                                                                                                 |
-| =clatter-buffer-max-lines=  | =10000=        | Max lines before buffer truncation                                                                                                                                                   |
-| =clatter-max-line-length=   | =400=          | Max IRC line length before splitting                                                                                                                                                 |
-| =clatter-message-order=     | =newest-first= | =newest-first= keeps the input at the top with new messages below it; =oldest-first= is a conventional layout with the input line anchored at the *bottom* and messages scrolling above it |
-| =clatter-move-to-prompt=    | =t=            | Typing anywhere jumps to the input line first (like ERC's =erc-move-to-prompt=)                                                                                                        |
-| =clatter-timestamp-side=    | ='right=       | Which margin to display timestamps: =left=, =right=, or =nil= to disable margin timestamps                                                                                              |
-| =clatter-fools-visible=     | =nil=          | When non-nil, show fool messages instead of hiding them (they remain dimmed)                                                                                                          |
+=clatter-next-item= and =clatter-previous-item= are unbound by default; bind them
+if you want to step between messages.
 
-** Message Suppression
+** Action menu (C-c C-a)
 
-| Variable                  | Default | Description                                               |
-|---------------------------+---------+-----------------------------------------------------------|
-| =clatter-suppress-messages= | =nil=     | List of symbols: join part quit nick mode away kick topic |
+The menu dispatches on a single key:
 
-Example:
-#+begin_src emacs-lisp
-(setopt clatter-suppress-messages '(join part quit away))
-#+end_src
+| Key | Action                    | Key | Action                       |
+|-----+---------------------------+-----+------------------------------|
+| =r=   | Reply                     | =w=   | WHOIS the sender             |
+| =e=   | React                     | =q=   | Open a query with the sender |
+| =c=   | Copy the message text     | =i=   | Inspect raw message properties |
+| =n=   | Copy the nick             | =I=   | Toggle ignore for the sender |
+| =u=   | Copy the URL              | =l=   | Collect all URLs in buffer   |
+| =o=   | Open the URL              |     |                              |
 
-** Input
+** Auxiliary buffers
 
-| Variable                      | Default | Description                      |
-|-------------------------------+---------+----------------------------------|
-| =clatter-flyspell-enable=       | =t=       | Enable flyspell in input area    |
-| =clatter-paste-flood-threshold= | =3=       | Lines before paste flood warning |
+| Key   | Channel list      | Search results          | Nick list        | Rawlog                       |
+|-------+-------------------+-------------------------+------------------+------------------------------|
+| =RET=   | Join channel      | Visit result            | Query nick       | -                            |
+| =o=     | -                 | Visit in other window   | -                | -                            |
+| =n= / =p= | -                 | Next / previous line    | -                | -                            |
+| =g=     | Refresh           | Refresh                 | Refresh          | -                            |
+| =f= / =/= | Filter by regexp  | -                       | -                | =f= filter by regexp           |
+| =c=     | -                 | -                       | -                | Clear the buffer             |
+| =t=     | -                 | -                       | -                | Toggle parsed message display |
+| =s=     | -                 | -                       | -                | Send a raw IRC line          |
+| =C=     | -                 | -                       | -                | Show CAP negotiation state   |
+| =q=     | Quit window       | Quit window             | Close sidebar    | Quit window                  |
 
-** Logging
+URLs in messages carry their own keymap: =RET= or =mouse-1= opens the URL at
+point.
 
-| Variable                     | Default                  | Description                  |
-|------------------------------+--------------------------+------------------------------|
-| =clatter-log-enable=           | =nil=                      | Enable channel logging       |
-| =clatter-log-directory=        | =~/.emacs.d/clatter/logs/= | Log file directory           |
-| =clatter-log-rotate-daily=     | =t=                        | Daily log rotation           |
-| =clatter-log-timestamp-format= | ="%Y-%m-%d %H:%M:%S"=      | Log timestamp format         |
-| =clatter-log-system-messages=  | =t=                        | Log joins/parts/quits        |
-| =clatter-log-server-buffer=    | =nil=                      | Log server buffer            |
-| =clatter-log-exclude-targets=  | =nil=                      | Targets to skip logging      |
-| =clatter-log-flush-interval=   | =30=                       | Seconds between disk flushes |
-
-Logging is enabled by ~clatter-setup~ when =clatter-log-enable= is
-non-nil (the default).  To turn it off, set the option to ~nil~ before
-calling ~clatter-setup~:
+** Example: Evil
 
 #+begin_src emacs-lisp
-(setopt clatter-log-enable nil)
-#+end_src
+(defun my/clatter-insert-at-prompt ()
+  "Move to the input prompt and enter Evil insert state."
+  (interactive)
+  (when clatter--input-marker
+    (goto-char clatter--input-marker)
+    (goto-char (line-end-position)))
+  (evil-insert-state))
 
-To toggle logging in a running session, use =M-x clatter-log-init= and
-=M-x clatter-log-teardown=.
-
-** Notifications
-
-| Variable                      | Default | Description                          |
-|-------------------------------+---------+--------------------------------------|
-| =clatter-notify-enabled=        | =t=       | Enable desktop notifications         |
-| =clatter-notify-on-mention=     | =t=       | Notify on nick mentions              |
-| =clatter-notify-on-dm=          | =t=       | Notify on direct messages            |
-| =clatter-notify-on-keyword=     | =t=       | Notify on keyword matches            |
-| =clatter-notify-keywords=       | =nil=     | Extra keywords to notify on          |
-| =clatter-notify-muted-channels= | =nil=     | Channels to never notify             |
-| =clatter-notify-muted-nicks=    | =nil=     | Nicks to never notify                |
-| =clatter-notify-current-buffer= | =nil=     | Notify even if buffer is visible     |
-| =clatter-notify-timeout=        | =5000=    | Notification timeout (ms)            |
-| =clatter-notify-icon=           | =nil=     | Path to notification icon            |
-| =clatter-notify-urgency=        | ='normal= | Urgency: low, normal, critical       |
-| =clatter-notify-sound=          | =nil=     | Sound file for notifications         |
-| =clatter-notify-max-length=     | =80=      | Max message length in notification   |
-| =clatter-notify-cooldown=       | =3=       | Min seconds between notifications    |
-| =clatter-notify-dm-priority=    | ='always= | DM priority: always, rules, never    |
-| =clatter-notify-rules=          | =nil=     | Per-channel smart notification rules |
-
-*** Smart Notification Rules
-
-Per-channel/nick rules with schedule support:
-
-#+begin_src emacs-lisp
-(setopt clatter-notify-rules
-        '((:target "#emacs" :level mentions :schedule (9 . 22))
-          (:target "#bots" :level none)
-          (:target "#systemcrafters" :level all)
-          (:target "friend" :level all)))
-#+end_src
-
-Rule levels:
-- =all= - notify on every message
-- =mentions= - notify on mentions and keywords only
-- =dms= - notify only for DMs from this target
-- =none= - never notify
-
-Schedules use 24h format =(START . END)=. Wraps midnight:
-=(22 . 8)= means 10pm to 8am.
-
-DM priority (=clatter-notify-dm-priority=):
-- =always= - DMs always notify regardless of rules (default)
-- =rules= - DMs follow per-target rules
-- =never= - never notify on DMs
-
-** Bouncer Playback
-
-When the server sends batched history (chathistory, ZNC playback, etc.),
-clatter renders it with visual separators:
-
-#+begin_example
- ------------------------------ history ------------------------------
-10:15        <alice> hey everyone
-10:16          <bob> morning!
- -------------------- end of history (2 messages) --------------------
-#+end_example
-
-This works automatically with any IRCv3 BATCH-based playback.
-
-** Channel Preview on Hover (eldoc)
-
-When point is on a =#channel= name in messages, eldoc shows the
-channel topic and user count in the echo area. When point is on a
-message, it shows the sender and message ID.
-
-This is enabled automatically via =eldoc-mode= in clatter buffers.
-
-** Nick Highlighting
-
-| Variable                        | Default | Description                 |
-|---------------------------------+---------+-----------------------------|
-| =clatter-hl-nicks-enabled=        | =t=       | Colorize nicks in messages  |
-| =clatter-hl-nicks-minimum-length= | =3=       | Min nick length to colorize |
-| =clatter-hl-nicks-skip-nicks=     | =nil=     | Nicks to never colorize     |
-| =clatter-hl-nicks-skip-faces=     | =(...)=  | Faces to skip colorizing    |
-| =clatter-hl-nicks-alias-alist=    | =nil=     | Nick -> color alias mapping |
-| =clatter-hl-keywords=             | =nil=     | Extra words to highlight    |
-
-** mIRC Formatting
-
-| Variable                  | Default | Description                       |
-|---------------------------+---------+-----------------------------------|
-| =clatter-format-enable=     | =t=       | Parse mIRC color/formatting codes |
-| =clatter-format-strip-only= | =nil=     | Strip codes without rendering     |
-
-** Inline Images
-
-| Variable                 | Default       | Description                  |
-|--------------------------+---------------+------------------------------|
-| =clatter-image-enable=     | =nil=           | Enable inline image previews |
-| =clatter-image-max-width=  | =400=           | Max image width (pixels)     |
-| =clatter-image-max-height= | =300=           | Max image height (pixels)    |
-| =clatter-image-max-size=   | =5242880= (5MB) | Max download size            |
-| =clatter-image-extensions= | =(png jpg ...)= | Recognized image extensions  |
-
-** URL Preview
-
-| Variable                             | Default | Description                  |
-|--------------------------------------+---------+------------------------------|
-| =clatter-url-preview-enable=           | =nil=     | Fetch and display URL titles |
-| =clatter-url-preview-max-length=       | =200=     | Max title length             |
-| =clatter-url-preview-timeout=          | =10=      | Fetch timeout (seconds)      |
-| =clatter-url-preview-exclude-patterns= | =nil=     | URL patterns to skip         |
-
-** Search
-
-| Variable                     | Default | Description                  |
-|------------------------------+---------+------------------------------|
-| =clatter-search-max-results=   | =500=     | Max search results           |
-| =clatter-search-context-lines= | =0=       | Context lines around matches |
-
-** Activity Tracking
-
-| Variable                     | Default      | Description                     |
-|------------------------------+--------------+---------------------------------|
-| =clatter-track-enabled=        | =t=            | Show activity in mode line      |
-| =clatter-track-position=       | ='after-modes= | Mode line position              |
-| =clatter-track-muted-channels= | =nil=          | Channels to ignore for tracking |
-| =clatter-track-shorten-names=  | =t=            | Abbreviate channel names        |
-| =clatter-track-show-counts=    | =t=            | Show unread message counts      |
-
-** Chat History
-
-| Variable                         | Default | Description           |
-|----------------------------------+---------+-----------------------|
-| =clatter-chathistory-enabled=      | =t=       | Fetch backlog on join |
-| =clatter-chathistory-limit=        | =50=      | Messages to fetch     |
-| =clatter-chathistory-on-join=      | =t=       | Fetch on channel join |
-| =clatter-chathistory-on-reconnect= | =t=       | Fetch on reconnect    |
-
-** Nick Completion
-
-| Variable                     | Default | Description                          |
-|------------------------------+---------+--------------------------------------|
-| =clatter-completion-add-colon= | =t=       | Append =:= after nick at start of line |
-
-** Nick List Sidebar
-
-| Variable               | Default | Description                |
-|------------------------+---------+----------------------------|
-| =clatter-nicklist-width= | =20=      | Sidebar width              |
-| =clatter-nicklist-side=  | ='right=  | Which side (left or right) |
-
-** Raw Protocol Log
-
-| Variable                   | Default | Description                       |
-|----------------------------+---------+-----------------------------------|
-| =clatter-log-raw-protocol=   | =nil=     | Log raw IRC lines to debug buffer |
-| =clatter-rawlog-enabled=     | =nil=     | Enable rawlog module              |
-| =clatter-rawlog-max-lines=   | =5000=    | Max rawlog buffer lines           |
-| =clatter-rawlog-show-parsed= | =t=       | Show parsed message breakdown     |
-
-** DCC File Transfer
-
-| Variable                       | Default      | Description                                     |
-|--------------------------------+--------------+-------------------------------------------------|
-| =clatter-dcc-download-directory= | =~/Downloads/= | Where received files are saved                  |
-| =clatter-dcc-auto-accept=        | =nil=          | Auto-accept DCC offers                          |
-| =clatter-dcc-max-file-size=      | =nil=          | Max file size to accept (bytes), nil = no limit |
-| =clatter-dcc-progress-interval=  | =2=            | Seconds between progress updates                |
-
-** Strict Transport Security
-
-| Variable                | Default                            | Description         |
-|-------------------------+------------------------------------+---------------------|
-| =clatter-sts-enable=      | =t=                                  | Auto-upgrade to TLS |
-| =clatter-sts-policy-file= | =~/.emacs.d/clatter/sts-policies.el= | Cached STS policies |
-
-** Read Marker
-
-| Variable                      | Default | Description                     |
-|-------------------------------+---------+---------------------------------|
-| =clatter-read-marker-enabled=   | =t=       | Sync read position with server  |
-| =clatter-read-marker-auto-send= | =t=       | Auto-send read marker on switch |
-
-* Modules
-
-Each module is a separate =.el= file. Most are loaded automatically
-by =clatter.el=. Optional modules need explicit =(require)=:
-
-** Auto-loaded (via =clatter.el=)
-
-- =clatter-config.el= - configuration variables
-- =clatter-protocol.el= - IRC message building/parsing
-- =clatter-connection.el= - TCP/TLS connections, reconnect
-- =clatter-handlers.el= - message dispatch and hooks
-- =clatter-model.el= - buffer registry, nick lists
-- =clatter-ui.el= - message rendering, input handling
-- =clatter-commands.el= - slash commands
-- =clatter-completion.el= - tab completion
-- =clatter-hl-nicks.el= - nick colorization and keywords
-- =clatter-track.el= - activity tracking (mode line)
-- =clatter-notify.el= - desktop notifications
-- =clatter-chathistory.el= - IRCv3 CHATHISTORY
-- =clatter-read-marker.el= - IRCv3 read markers
-
-** Enabling the bundled extras
-
-Activity tracking, desktop notifications, chathistory, read markers,
-channel logging and URL previews are bundled with clatter but enabled
-only when you call ~clatter-setup~ (see Quick Start).  Each is gated by
-its own user option:
-
-| Option                      | Feature                     | Default |
-|-----------------------------+-----------------------------+---------|
-| =clatter-track-enabled=       | Mode-line activity tracking | on      |
-| =clatter-notify-enabled=      | Desktop notifications       | on      |
-| =clatter-chathistory-enabled= | IRCv3 CHATHISTORY on join   | on      |
-| =clatter-read-marker-enabled= | IRCv3 read markers          | on      |
-| =clatter-log-enable=          | Channel logging to file     | off     |
-| =clatter-url-preview-enable=  | Inline URL title previews   | off     |
-
-Set an option to ~nil~ (or ~t~ for the off-by-default ones) before
-calling ~clatter-setup~.  You can also toggle a feature at runtime with its
-=clatter-FEATURE-enable= / =clatter-FEATURE-disable= command.
-
-** Optional (require explicitly)
-
-#+begin_src emacs-lisp
-;; Inline images (GUI only)
-(require 'clatter-image)
-(setopt clatter-image-enable t)
-
-;; Org-mode integration: register the "irc:" link type with Org.
-(with-eval-after-load 'org
-  (require 'clatter-org)
-  (clatter-org-setup))
-
-;; Full-text search (auto-loaded by commands, but can require directly)
-(require 'clatter-search)
-
-;; DCC file transfer (loaded by clatter-commands, but can require directly)
-(require 'clatter-dcc)
-(clatter-dcc-setup)
-#+end_src
-
-* Org-mode Integration
-
-** Storing Links
-
-In any clatter buffer, =M-x org-store-link= (or =C-c l=) stores
-a link to the message at point:
-
-#+begin_example
-[[irc:libera/#emacs#abc123][IRC: <user> their message (#emacs)]]
-#+end_example
-
-** Capture Templates
-
-Add to your org-capture templates:
-
-#+begin_src emacs-lisp
-(setq org-capture-templates
-      '(("i" "IRC Message" entry
-         (file+headline "~/org/irc.org" "Captured Messages")
-         "* %U IRC Note\n%(clatter-org-capture-message)\n%?"
-         :empty-lines 1)
-        ("c" "IRC Channel Note" entry
-         (file+headline "~/org/irc.org" "Channel Notes")
-         "* %U %(clatter-org-capture-channel)\n%?"
-         :empty-lines 1)))
-#+end_src
-
-Then =M-x org-capture= from a clatter buffer captures the message
-at point with sender, text, channel, and timestamp.
-
-** Exporting Logs
-
-=M-x clatter-org-export-log= converts a log file to org format,
-grouped by date with timestamped entries.
-
-* Keybinding Examples
-
-** Evil Mode
-
-#+begin_src emacs-lisp
 (with-eval-after-load 'evil
   (evil-set-initial-state 'clatter-mode 'normal)
   (evil-define-key 'normal clatter-mode-map
     (kbd "g o") #'clatter-hl-open-url-nearest
-    (kbd "i") #'clatter-evil-insert-at-prompt)
-
-  (defun clatter-evil-insert-at-prompt ()
-    "Move to the input prompt and enter Evil insert state."
-    (interactive)
-    (when clatter--input-marker
-      (goto-char clatter--input-marker)
-      (goto-char (line-end-position)))
-    (evil-insert-state)))
+    (kbd "i")   #'my/clatter-insert-at-prompt))
 #+end_src
 
-** General Leader Keys
+With Evil, =SPC= only acts as a leader in *normal state*. Once you press =i= to
+enter insert state at the prompt, =SPC= types a space as expected - a =SPC=
+leader does not conflict with typing messages.
+
+** Example: Vanilla Emacs
 
 #+begin_src emacs-lisp
 (global-set-key (kbd "C-c i i") #'clatter)
@@ -633,6 +554,425 @@ grouped by date with timestamped entries.
 (global-set-key (kbd "C-c i /") #'clatter-search)
 #+end_src
 
+* Configuration Reference
+
+** Connection
+
+| Variable                        | Default             | Description                               |
+|---------------------------------+---------------------+-------------------------------------------|
+| =clatter-networks=                | =nil=                 | Network definitions (see [[*clatter-networks][clatter-networks]])   |
+| =clatter-default-nick=            | =(user-login-name)=   | Fallback nickname                         |
+| =clatter-default-realname=        | ="clatter.el user"=   | Fallback real name                        |
+| =clatter-default-port=            | =6697=                | Fallback port                             |
+| =clatter-default-tls=             | =t=                   | Use TLS unless a network overrides it     |
+| =clatter-use-auth-source=         | =t=                   | Look up passwords via auth-source         |
+| =clatter-proxy=                   | =nil=                 | Global SOCKS5 proxy plist                 |
+| =clatter-tls-method=              | ='builtin=            | =builtin= (in-process GnuTLS) or =external=   |
+| =clatter-tls-external-command=    | ="gnutls-cli"=        | External TLS client, when =external=        |
+| =clatter-reconnect-initial-delay= | =10=                  | Seconds before the first reconnect        |
+| =clatter-reconnect-max-delay=     | =300=                 | Backoff ceiling                           |
+| =clatter-ping-interval=           | =30=                  | Seconds between health pings              |
+| =clatter-ping-timeout=            | =120=                 | Silence before declaring the link dead    |
+| =clatter-quit-on-exit=            | =t=                   | QUIT all networks when Emacs exits        |
+| =clatter-quit-message=            | ="clatter.el"=        | Default QUIT message                      |
+| =clatter-max-line-length=         | =400=                 | Max outgoing payload before splitting     |
+
+=clatter-tls-method= defaults to =builtin=, which is simplest but can block the
+single-threaded Emacs event loop if a socket goes silently half-open. =external=
+runs =gnutls-cli= (or =openssl=) as a subprocess instead, at the cost of being
+incompatible with =clatter-proxy=.
+
+** Identity and Nick Recovery
+
+| Variable                            | Default | Description                                        |
+|-------------------------------------+---------+----------------------------------------------------|
+| =clatter-auto-identify=               | =t=       | Send NickServ IDENTIFY after registration without SASL |
+| =clatter-nick-reclaim-enabled=        | =t=       | Periodically retry claiming your configured nick   |
+| =clatter-nick-reclaim-initial-delay=  | =8=       | Seconds before the first reclaim attempt           |
+| =clatter-nick-reclaim-use-regain=     | =nil=     | Use NickServ REGAIN instead of a bare NICK         |
+
+A network marked =:bouncer t= skips both auto-identify and reclaim regardless of
+these settings. =clatter-nick-reclaim-use-regain= defaults off deliberately:
+REGAIN forcibly kills whatever session holds the nick, which will fight with a
+legitimate second client.
+
+** Display
+
+| Variable                       | Default        | Description                                                |
+|--------------------------------+----------------+------------------------------------------------------------|
+| =clatter-message-order=          | ='newest-first= | Input at top with messages below, or =oldest-first=          |
+| =clatter-timestamp-format=       | ="%H:%M"=        | Timestamp format string                                    |
+| =clatter-timestamp-side=         | ='right=        | Margin for timestamps: =left=, =right=, or =nil= to disable      |
+| =clatter-timestamp-only-if-changed= | =nil=       | Show a timestamp only when it differs from the previous    |
+| =clatter-fill-column=            | =80=             | Wrap column; =auto= derives it from the window, =nil= disables |
+| =clatter-nick-column-width=      | =20=             | Width of the right-aligned nick column                     |
+| =clatter-buffer-max-lines=       | =10000=          | Truncate a buffer past this many lines                     |
+| =clatter-buffer-name-style=      | ='full=         | =full=, =network= or =channel= buffer naming                     |
+| =clatter-header-line-preset=     | =nil=            | =topic= or =context= moves channel info to the header line     |
+| =clatter-prompt-format=          | ="%t> "=         | =%t= target, =%n= nick, =%N= network; or a function              |
+| =clatter-prompt-alignment=       | =nil=            | =right= aligns the prompt with the nick column               |
+| =clatter-away-indicator=         | ="@"=            | Marker appended to your nick while away                    |
+| =clatter-bot-label=              | ="[bot]"=        | Label on messages from nicks with bot mode                 |
+| =clatter-display-on-join=        | =t=              | Show the channel buffer when you join                      |
+| =clatter-display-on-welcome=     | =t=              | Show the server buffer after the welcome numeric           |
+| =clatter-receive-query-display=  | ='bury=         | Incoming DM buffers: =bury=, =buffer= or =pop=                   |
+
+*** Compact system messages
+
+Presence and moderation events can be collapsed into terse glyph runs instead
+of one line each:
+
+| Variable                             | Default | Description                                           |
+|--------------------------------------+---------+-------------------------------------------------------|
+| =clatter-compact-system-messages=      | =nil=     | =nil=, =compact=, =essential=, =reasons= or =full=              |
+| =clatter-compact-system-group-window=  | =180=     | Seconds within which events group together            |
+| =clatter-compact-system-separator=     | =" · "=   | Separator between grouped events                      |
+| =clatter-compact-system-symbols=       | (glyphs) | Per-event glyphs: join =→=, part =←=, quit =×=, nick =»=, ... |
+
+** Input
+
+| Variable                      | Default   | Description                                        |
+|-------------------------------+-----------+----------------------------------------------------|
+| =clatter-move-to-prompt=        | =t=         | Typing anywhere jumps to the input line first      |
+| =clatter-flyspell-enable=       | =t=         | Flyspell in the input area                         |
+| =clatter-paste-flood-threshold= | =3=         | Lines before a paste-flood confirmation            |
+| =clatter-input-ring-size=       | =1024=      | Input history ring size                            |
+| =clatter-self-echo-mode=        | ='server=  | =server= waits for echo-message; =optimistic= shows at once |
+| =clatter-self-echo-timeout=     | =30=        | Seconds an optimistic echo waits for reconciliation |
+| =clatter-send-typing=           | =t=         | Send outbound typing notifications                 |
+| =clatter-typing-timeout=        | =6=         | Seconds before an incoming typing indicator expires |
+
+** Message Suppression and Filtering
+
+| Variable                  | Default   | Description                                                     |
+|---------------------------+-----------+-----------------------------------------------------------------|
+| =clatter-suppress-messages= | =(muted)=   | Types hidden in new buffers: join part quit nick mode away kick topic |
+| =clatter-ignore-list=       | =nil=       | Ignored nick or hostmask patterns; glob =*= and =?=                 |
+| =clatter-pals=              | =nil=       | Nicks highlighted as pals                                       |
+| =clatter-fools=             | =nil=       | Nicks dimmed and hidden                                         |
+| =clatter-fools-visible=     | =nil=       | Show fool messages dimmed instead of hidden                     |
+| =clatter-mention-p-function= | =clatter-nick-match-p= | Whole-word or substring mention matching             |
+
+Suppression is non-destructive: matching messages are still inserted, just
+hidden, so =/unsuppress= reveals the history you missed.
+
+#+begin_src emacs-lisp
+(setopt clatter-suppress-messages '(join part quit away))
+#+end_src
+
+** Nick Highlighting
+
+| Variable                        | Default   | Description                              |
+|---------------------------------+-----------+------------------------------------------|
+| =clatter-hl-nicks-enabled=        | =t=         | Colorize nicks in message text           |
+| =clatter-hl-nicks-minimum-length= | =3=         | Shortest nick eligible for colorization  |
+| =clatter-hl-nicks-skip-nicks=     | =nil=       | Nicks never colorized                    |
+| =clatter-hl-nicks-skip-faces=     | (3 faces) | Faces exempt from in-text highlighting   |
+| =clatter-hl-nicks-alias-alist=    | =nil=       | Map alternate nicks to a canonical color |
+| =clatter-hl-nick-base-faces=      | 12 faces  | Palette nicks inherit from               |
+| =clatter-hl-keywords=             | =nil=       | Extra words highlighted in message text  |
+
+Nick colors are derived from the active theme rather than hardcoded: each nick
+hashes deterministically onto one of the =font-lock-*= faces in
+=clatter-hl-nick-base-faces=, so the same nick keeps its color across sessions
+and the palette follows whatever theme you load. Customize that list to change
+the palette, then run =M-x clatter-hl-rebuild-nick-faces= (with a prefix
+argument to refresh faces already in use).
+
+** Activity Tracking
+
+| Variable                       | Default        | Description                                    |
+|--------------------------------+----------------+------------------------------------------------|
+| =clatter-track-enabled=          | =t=              | Show activity in the global mode line          |
+| =clatter-track-position=         | ='after-modes=  | Placement within the mode line                 |
+| =clatter-track-muted-channels=   | =nil=            | Targets dimmed but still tracked               |
+| =clatter-track-exclude-targets=  | =nil=            | Targets hidden from every tracker surface      |
+| =clatter-track-shorten-names=    | =t=              | Abbreviate channel names in the indicator      |
+| =clatter-track-show-counts=      | =t=              | Show unread counts                             |
+| =clatter-track-count-style=      | ='suffix=       | =suffix=, =superscript=, =subscript=, =glyph=, =none=    |
+| =clatter-track-indicators=       | =@= / =*= / (none) | Prefix glyph for mention / DM / activity       |
+| =clatter-track-faces-alist=      | (4 faces)      | Face per activity type                         |
+| =clatter-track-in-buffer-mode-line= | =nil=       | Also show crumbs in each clatter buffer        |
+
+Mentions sort above DMs, which sort above plain activity.
+=M-x clatter-track-switch= jumps to the most urgent buffer and
+=M-x clatter-track-list= shows everything. Mode-line entries are clickable. With
+=consult= installed, narrow =consult-buffer= with =i= to see tracked buffers.
+
+** Notifications
+
+| Variable                      | Default   | Description                          |
+|-------------------------------+-----------+--------------------------------------|
+| =clatter-notify-enabled=        | =t=         | Enable desktop notifications         |
+| =clatter-notify-on-mention=     | =t=         | Notify on nick mentions              |
+| =clatter-notify-on-dm=          | =t=         | Notify on direct messages            |
+| =clatter-notify-on-invite=      | =t=         | Notify on channel invitations        |
+| =clatter-notify-on-keyword=     | =t=         | Notify on keyword matches            |
+| =clatter-notify-keywords=       | =nil=       | Extra keywords to notify on          |
+| =clatter-notify-muted-channels= | =nil=       | Channels that never notify           |
+| =clatter-notify-muted-nicks=    | =nil=       | Nick patterns that never notify      |
+| =clatter-notify-current-buffer= | =nil=       | Notify even for the visible buffer   |
+| =clatter-notify-echo-area=      | =nil=       | Echo-area fallback when native delivery fails |
+| =clatter-notify-timeout=        | =5000=      | Notification timeout (ms)            |
+| =clatter-notify-icon=           | =nil=       | Path to a notification icon          |
+| =clatter-notify-urgency=        | ='normal=  | =low=, =normal= or =critical=              |
+| =clatter-notify-sound=          | =nil=       | Sound file                           |
+| =clatter-notify-max-length=     | =80=        | Max message length in a notification |
+| =clatter-notify-cooldown=       | =3=         | Min seconds between notifications per source |
+| =clatter-notify-dm-priority=    | ='always=  | =always=, =rules= or =never=               |
+| =clatter-notify-rules=          | =nil=       | Per-target rules (see below)         |
+
+Delivery uses Emacs-native notifications (D-Bus, Android, Haiku or Windows),
+falling back to =terminal-notifier= on macOS. Failure is silent unless
+=clatter-notify-echo-area= is on. =M-x clatter-notify-test= verifies the setup.
+
+*** Smart notification rules
+
+#+begin_src emacs-lisp
+(setopt clatter-notify-rules
+        '((:target "#emacs" :level mentions :schedule (9 . 22))
+          (:target "#bots" :level none)
+          (:target "#systemcrafters" :level all)
+          (:target "friend" :level all)))
+#+end_src
+
+Levels: =all= notifies on every message, =mentions= on mentions and keywords only,
+=dms= only for DMs from that target, =none= never.
+
+Schedules use 24h format =(START . END)= and wrap midnight, so =(22 . 8)= means
+10pm to 8am.
+
+=clatter-notify-dm-priority= decides whether DMs obey these rules: =always= (the
+default) means DMs notify regardless, =rules= makes them follow per-target rules,
+=never= silences them.
+
+** Logging
+
+| Variable                     | Default                  | Description                  |
+|------------------------------+--------------------------+------------------------------|
+| =clatter-log-enable=           | =nil=                      | Enable channel logging       |
+| =clatter-log-directory=        | =~/.emacs.d/clatter/logs/= | Log file directory           |
+| =clatter-log-rotate-daily=     | =t=                        | Daily log rotation           |
+| =clatter-log-timestamp-format= | ="%Y-%m-%d %H:%M:%S"=      | Log timestamp format         |
+| =clatter-log-system-messages=  | =t=                        | Log joins/parts/quits        |
+| =clatter-log-server-buffer=    | =nil=                      | Also log the server buffer   |
+| =clatter-log-exclude-targets=  | =nil=                      | Targets to skip              |
+| =clatter-log-flush-interval=   | =30=                       | Seconds between disk flushes |
+
+Logging is *off* by default. Set =clatter-log-enable= to =t= before calling
+=clatter-setup= to turn it on:
+
+#+begin_src emacs-lisp
+(setopt clatter-log-enable t)
+(clatter-setup)
+#+end_src
+
+Files are written as =network/target-YYYY-MM-DD.log=. To toggle logging in a
+running session use =M-x clatter-log-init= and =M-x clatter-log-teardown=.
+=M-x clatter-log-open= opens the current channel's log,
+=M-x clatter-log-open-directory= browses them all. Full-text search depends on
+these files existing.
+
+** Search
+
+| Variable                     | Default | Description                  |
+|------------------------------+---------+------------------------------|
+| =clatter-search-max-results=   | =500=     | Max search results           |
+| =clatter-search-context-lines= | =0=       | Context lines around matches |
+
+** Chat History and Read Markers
+
+| Variable                         | Default | Description                                |
+|----------------------------------+---------+--------------------------------------------|
+| =clatter-chathistory-enabled=      | =t=       | Enable IRCv3 CHATHISTORY                   |
+| =clatter-chathistory-limit=        | =50=      | Messages fetched per request               |
+| =clatter-chathistory-on-join=      | =t=       | Fetch on channel join                      |
+| =clatter-chathistory-on-reconnect= | =t=       | Fetch the gap on reconnect                 |
+| =clatter-read-marker-enabled=      | =t=       | Sync read position with the server         |
+| =clatter-read-marker-auto-send=    | =t=       | Send MARKREAD when switching to a buffer   |
+| =clatter-read-state-enabled=       | =t=       | Local last-read fallback for bouncers      |
+| =clatter-read-state-file=          | =~/.emacs.d/clatter/read-state.el= | Where local read state lives |
+| =clatter-read-state-save-delay=    | =2=       | Debounce seconds for read-state writes     |
+
+=M-x clatter-chathistory-more= fetches older messages;
+=M-x clatter-read-marker-mark= and =M-x clatter-read-marker-query= drive the
+marker manually. Requires the =server-time=, =batch= and =message-tags=
+capabilities, which clatter negotiates by default.
+
+Batched playback - CHATHISTORY, ZNC playback, anything using IRCv3 BATCH -
+renders with separators:
+
+#+begin_example
+ ------------------------------ history ------------------------------
+10:15        <alice> hey everyone
+10:16          <bob> morning!
+ -------------------- end of history (2 messages) --------------------
+#+end_example
+
+** Nick Completion
+
+| Variable                     | Default | Description                            |
+|------------------------------+---------+----------------------------------------|
+| =clatter-completion-add-colon= | =t=       | Append =:= after a nick at start of line |
+
+Completion is a standard CAPF, so it works with corfu, vertico and orderless.
+It completes nicks, =/commands= and =#channels=; annotations show channel prefix
+for nicks and a description for commands.
+
+** Nick List Sidebar
+
+| Variable               | Default  | Description                |
+|------------------------+----------+----------------------------|
+| =clatter-nicklist-width= | =20=       | Sidebar width              |
+| =clatter-nicklist-side=  | ='right=  | Which side (left or right) |
+
+Toggle per buffer with =M-x clatter-nicklist-toggle=.
+
+** mIRC Formatting
+
+| Variable                  | Default | Description                       |
+|---------------------------+---------+-----------------------------------|
+| =clatter-format-enable=     | =t=       | Parse mIRC color/formatting codes |
+| =clatter-format-strip-only= | =nil=     | Strip codes without rendering     |
+
+** URL Preview
+
+| Variable                             | Default    | Description                  |
+|--------------------------------------+------------+------------------------------|
+| =clatter-url-preview-enable=           | =nil=        | Fetch and display URL titles |
+| =clatter-url-preview-max-length=       | =200=        | Max title length             |
+| =clatter-url-preview-timeout=          | =10=         | Fetch timeout (seconds)      |
+| =clatter-url-preview-exclude-patterns= | 15 regexps | Binary/media URLs to skip    |
+
+Titles are cached, so a repeated link is not re-fetched. Requires =curl=.
+
+** Inline Images
+
+| Variable                 | Default         | Description                  |
+|--------------------------+-----------------+------------------------------|
+| =clatter-image-enable=     | =nil=             | Enable inline image previews |
+| =clatter-image-max-width=  | =400=             | Max image width (pixels)     |
+| =clatter-image-max-height= | =300=             | Max image height (pixels)    |
+| =clatter-image-max-size=   | =5242880= (5 MB)  | Max download size            |
+| =clatter-image-extensions= | =(png jpg ...)=   | Recognized image extensions  |
+
+GUI frames only; a no-op in a terminal. Fetching is an async =curl= subprocess.
+
+** Raw Protocol Log
+
+| Variable                   | Default | Description                       |
+|----------------------------+---------+-----------------------------------|
+| =clatter-rawlog-enabled=     | =nil=     | Enable rawlog buffers             |
+| =clatter-rawlog-max-lines=   | =5000=    | Max lines per rawlog buffer       |
+| =clatter-rawlog-show-parsed= | =t=       | Show the parsed message breakdown |
+| =clatter-log-raw-protocol=   | =nil=     | Log raw lines to =*clatter-debug*=  |
+
+** DCC File Transfer
+
+| Variable                       | Default        | Description                               |
+|--------------------------------+----------------+-------------------------------------------|
+| =clatter-dcc-download-directory= | =~/Downloads/=   | Where received files are saved            |
+| =clatter-dcc-auto-accept=        | =nil=            | Auto-accept incoming offers               |
+| =clatter-dcc-max-file-size=      | =0=              | Max accepted size in bytes; =0= = unlimited |
+| =clatter-dcc-progress-interval=  | =2=              | Seconds between progress updates          |
+
+These live in their own customize group, =clatter-dcc=.
+
+** Channel Preview on Hover
+
+When point is on a =#channel= name, eldoc shows the topic and user count in the
+echo area; on a message, it shows the sender and message ID. This is automatic
+via =eldoc-mode= in clatter buffers and needs no configuration.
+
+* Modules
+
+Each module is a separate =.el= file. There are no minor modes: features are
+controlled by user options plus =clatter-setup=.
+
+The *Enabled by* column distinguishes three cases - loaded and always active,
+loaded but gated by an option that =clatter-setup= consults, and needing an
+explicit call from your configuration.
+
+| Module                   | What it does                                  | Enabled by                          |
+|--------------------------+-----------------------------------------------+-------------------------------------|
+| =clatter.el=               | Entry points, autoloads, =clatter-setup=        | always                              |
+| =clatter-config.el=        | User options, auth-source lookup              | always                              |
+| =clatter-protocol.el=      | IRC message parsing and formatting            | always                              |
+| =clatter-connection.el=    | TCP/TLS, reconnect, health pings              | always                              |
+| =clatter-socks.el=         | SOCKS5 / Tor proxy                            | =:proxy= / =:tor= per network           |
+| =clatter-cap.el=           | CAP negotiation and SASL                      | always                              |
+| =clatter-sasl-scram.el=    | SASL SCRAM-SHA-256 (RFC 5802)                 | =:sasl scram-sha-256=                 |
+| =clatter-sts.el=           | IRCv3 Strict Transport Security               | =clatter-sts-enable= (on)             |
+| =clatter-handlers.el=      | Message dispatch and hooks                    | always                              |
+| =clatter-model.el=         | Buffer registry, channel and nick state       | always                              |
+| =clatter-ui.el=            | Rendering, faces, mode line, input            | always                              |
+| =clatter-commands.el=      | Slash commands                                | always                              |
+| =clatter-completion.el=    | Completion at point                           | always                              |
+| =clatter-actions.el=       | Message action menu                           | always                              |
+| =clatter-hl-nicks.el=      | Nick colorization, keywords, URL links        | =clatter-hl-nicks-enabled= (on)       |
+| =clatter-format.el=        | mIRC color and formatting codes               | =clatter-format-enable= (on)          |
+| =clatter-smart.el=         | Adaptive noise filtering                      | =clatter-smart-enabled= (on)          |
+| =clatter-pals.el=          | Pals, fools and visibility                    | =clatter-pals= / =clatter-fools=        |
+| =clatter-nicklist.el=      | Channel member sidebar                        | =clatter-nicklist-toggle=             |
+| =clatter-list.el=          | Channel list browser                          | =/list=                               |
+| =clatter-track.el=         | Mode-line activity tracking                   | =clatter-track-enabled= (on)          |
+| =clatter-notify.el=        | Desktop notifications                         | =clatter-notify-enabled= (on)         |
+| =clatter-chathistory.el=   | IRCv3 CHATHISTORY backlog                     | =clatter-chathistory-enabled= (on)    |
+| =clatter-read-marker.el=   | IRCv3 read markers                            | =clatter-read-marker-enabled= (on)    |
+| =clatter-soju.el=          | soju bouncer network fan-out                  | =clatter-soju-enabled= (on) + =:bouncer= |
+| =clatter-log.el=           | Channel logging with daily rotation           | =clatter-log-enable= (off)            |
+| =clatter-url-preview.el=   | Async URL title preview                       | =clatter-url-preview-enable= (off)    |
+| =clatter-rawlog.el=        | Raw protocol inspector                        | =clatter-rawlog-enabled= (off)        |
+| =clatter-search.el=        | Full-text search across logs                  | =/search= (loaded on demand)          |
+| =clatter-image.el=         | Inline image preview (GUI only)               | =(require 'clatter-image)= + =clatter-image-enable= |
+| =clatter-dcc.el=           | DCC file transfer                             | =(clatter-dcc-setup)=                 |
+| =clatter-org.el=           | Org links, capture, log export                | =(clatter-org-setup)=                 |
+
+The on-by-default extras can also be toggled at runtime with their
+=clatter-FEATURE-enable= / =clatter-FEATURE-disable= commands.
+
+* Org-mode Integration
+
+Org is not a dependency of clatter, so the =irc:= link type is not registered
+automatically:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'org
+  (require 'clatter-org)
+  (clatter-org-setup))
+#+end_src
+
+** Storing Links
+
+In any clatter buffer, =M-x org-store-link= stores a link to the message at
+point:
+
+#+begin_example
+[[irc:libera/#emacs#abc123][IRC: <user> their message (#emacs)]]
+#+end_example
+
+** Capture Templates
+
+#+begin_src emacs-lisp
+(setq org-capture-templates
+      '(("i" "IRC Message" entry
+         (file+headline "~/org/irc.org" "Captured Messages")
+         "* %U IRC Note\n%(clatter-org-capture-message)\n%?"
+         :empty-lines 1)
+        ("c" "IRC Channel Note" entry
+         (file+headline "~/org/irc.org" "Channel Notes")
+         "* %U %(clatter-org-capture-channel)\n%?"
+         :empty-lines 1)))
+#+end_src
+
+Then =M-x org-capture= from a clatter buffer captures the message at point with
+sender, text, channel and timestamp.
+
+** Exporting Logs
+
+=M-x clatter-org-export-log= converts a log file to org format, grouped by date
+with timestamped entries.
+
 * Troubleshooting
 
 ** Debug Logging
@@ -643,52 +983,53 @@ Enable raw protocol logging to see all IRC traffic:
 (setopt clatter-log-raw-protocol t)
 #+end_src
 
-Open the debug buffer: =M-x clatter-rawlog-open=.
-Incoming lines are green (=<<=), outgoing are blue (=>>=).
-
-** Direct Messages
-
-DMs automatically create a new buffer when someone messages you.
-The buffer is named =*clatter: network/nick*=. Activity tracking
-will flag it in the mode line.
-
-** Stale Byte-Compiled Files
-
-If you see void-function errors after updating, delete =.elc= files:
-
-#+begin_example
-cd ~/SourceCode/clatter.el && rm -f *.elc
-#+end_example
+Open the debug buffer with =M-x clatter-rawlog-open=. Incoming lines are green
+(=<<=), outgoing are blue (=>>=). Press =C= in that buffer to see the negotiated
+capabilities, =t= to toggle the parsed breakdown.
 
 ** Connection Issues
 
-- Check =M-x clatter-status= for connection state
-- Verify auth-source entry matches =:server= and =:nick=
-- STS may auto-upgrade port 6667 to 6697 - check rawlog
-- Set =clatter-reconnect-max-delay= lower for faster reconnects
+- =M-x clatter-status= shows state, nick and capability count per connection.
+- Verify the auth-source entry matches - remember that =machine= can be either
+  the network name or the hostname, =port= participates in matching, and =login=
+  is your nick. See [[*Passwords and auth-source][Passwords and auth-source]].
+- STS may upgrade a plaintext port to TLS on its own; check the rawlog if a
+  connection lands somewhere unexpected.
+- A SOCKS proxy plus =clatter-tls-method= set to =external= is a hard error.
+  Proxies require builtin TLS.
+- Lower =clatter-reconnect-max-delay= for faster reconnects.
 
-** Message Suppression
+** Connected but Not Identified
 
-If your buffer is too noisy with joins/parts/quits:
+SASL failure does not abort registration - you end up connected but
+unauthenticated. Check the server buffer for a 904/905/906 numeric. Common
+causes: a =:client-cert= path that does not exist (clatter then never requests
+SASL at all), or a password that auth-source could not resolve because =login=
+was matched against the nick rather than the account name.
+
+** Direct Messages
+
+DMs automatically create a buffer when someone messages you, named
+=*clatter:network/nick*= by default. It is created without stealing your window;
+set =clatter-receive-query-display= to =buffer= or =pop= to change that. Activity
+tracking flags it in the mode line.
+
+** Stale Byte-Compiled Files
+
+If you see void-function errors after updating, delete the =.elc= files in your
+clatter checkout:
+
+#+begin_example
+rm -f /path/to/clatter.el/*.elc
+#+end_example
+
+** Too Much Noise
 
 #+begin_src emacs-lisp
 (setopt clatter-suppress-messages '(join part quit away))
 #+end_src
 
-Or at runtime: =/suppress join part quit away=
-
-To undo: =/unsuppress away= or =/suppress none=
-
-** Keybindings and SPC Leader
-
-clatter does not bind any global keys. All functionality is available
-via =M-x= commands and =/slash= commands in the input prompt.
-
-If you see references to =SPC i= key sequences, those are examples of
-user-configured Evil leader bindings (e.g. via general.el). They are
-not built into clatter. See the *Keybinding Examples* section above
-for how to set them up.
-
-With Evil, =SPC= only acts as a leader key in *normal state*. When
-you press =i= to enter insert state at the prompt, =SPC= types a
-space character as expected. There is no conflict.
+Or at runtime, per buffer: =/suppress join part quit away=, undone with
+=/unsuppress away= or =/suppress none=. For a busy channel, =/suppress noise=
+enables adaptive filtering instead - see [[*Smart noise filtering][Smart noise filtering]]. To keep the
+events but shrink them, set =clatter-compact-system-messages= to =compact=.
