@@ -79,7 +79,7 @@
   :group 'clatter)
 
 (defface clatter-mention
-  '((t :inherit font-lock-warning-face :weight bold))
+  '((t :inherit error :weight bold))
   "Face for highlighted mentions of your nick."
   :group 'clatter)
 

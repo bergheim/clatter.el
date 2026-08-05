@@ -127,7 +127,7 @@ so the crumbs appear everywhere.  Setting this through Customize or
 ;; --- Faces ---
 
 (defface clatter-track-mention
-  '((t :inherit font-lock-warning-face :weight bold))
+  '((t :inherit error :weight bold))
   "Face for channels with unread mentions."
   :group 'clatter)
 
