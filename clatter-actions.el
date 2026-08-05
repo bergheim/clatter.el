@@ -221,7 +221,7 @@ With a prefix argument ARG, uses a /reply command."
             (insert (make-string 40 ?-) "\n\n")
             (dolist (url (nreverse urls))
               (insert (propertize url
-                                  'face '(:foreground "#89ddff" :underline t)
+                                  'face 'link
                                   'mouse-face 'highlight
                                   'clatter-url url)
                       "\n"))

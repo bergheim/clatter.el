@@ -31,17 +31,17 @@
   :group 'clatter)
 
 (defface clatter-search-match
-  '((t :foreground "#ffcb6b" :weight bold))
+  '((t :inherit font-lock-type-face :weight bold))
   "Face for highlighted search matches."
   :group 'clatter)
 
 (defface clatter-search-file
-  '((t :foreground "#82aaff" :slant italic))
+  '((t :inherit font-lock-keyword-face :slant italic))
   "Face for file/channel names in search results."
   :group 'clatter)
 
 (defface clatter-search-timestamp
-  '((t :foreground "#676e95"))
+  '((t :inherit font-lock-doc-face))
   "Face for timestamps in search results."
   :group 'clatter)
 

@@ -39,32 +39,32 @@ When non-nil, all IRC traffic is logged to rawlog buffers."
 ;; --- Faces ---
 
 (defface clatter-rawlog-incoming
-  '((t :foreground "#c3e88d"))
+  '((t :inherit font-lock-string-face))
   "Face for incoming (server to client) raw lines."
   :group 'clatter)
 
 (defface clatter-rawlog-outgoing
-  '((t :foreground "#82aaff"))
+  '((t :inherit font-lock-keyword-face))
   "Face for outgoing (client to server) raw lines."
   :group 'clatter)
 
 (defface clatter-rawlog-timestamp
-  '((t :foreground "#7c7c7c"))
+  '((t :inherit font-lock-doc-face))
   "Face for timestamps in rawlog."
   :group 'clatter)
 
 (defface clatter-rawlog-tag
-  '((t :foreground "#c792ea"))
+  '((t :inherit font-lock-constant-face))
   "Face for IRCv3 message tags."
   :group 'clatter)
 
 (defface clatter-rawlog-command
-  '((t :foreground "#ffcb6b" :weight bold))
+  '((t :inherit font-lock-type-face :weight bold))
   "Face for IRC command names."
   :group 'clatter)
 
 (defface clatter-rawlog-prefix
-  '((t :foreground "#89ddff"))
+  '((t :inherit font-lock-builtin-face))
   "Face for message prefix/source."
   :group 'clatter)
 

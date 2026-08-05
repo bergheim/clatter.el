@@ -3,8 +3,9 @@
 ;;; Commentary:
 
 ;; Tests for the named-face nick coloring in clatter-hl-nicks.el.
-;; These guard the rework from inline (:foreground ...) specs to real,
-;; themeable faces, and ensure it does not break existing color mapping.
+;; These guard the theme-driven design where each `clatter-nick-color-N'
+;; face inherits from a standard face in `clatter-hl-nick-base-faces',
+;; so nick colors follow the active Emacs theme.
 
 ;;; Code:
 
@@ -24,7 +25,7 @@
 
 (ert-deftest clatter-hl-nick-index-deterministic-and-in-range ()
   "The palette index is stable and within bounds."
-  (let ((n (length clatter-hl-nick-colors)))
+  (let ((n (length clatter-hl-nick-base-faces)))
     (should (equal (clatter-hl-nick-index "alice")
                    (clatter-hl-nick-index "alice")))
     (dolist (nick '("alice" "bob" "Carol" "knighthk" "x" ""))
@@ -51,33 +52,39 @@
   (should (eq (clatter-hl-nick-face-symbol "alice")
               (clatter-hl-nick-face-symbol "alice"))))
 
-(ert-deftest clatter-hl-nick-face-matches-palette-color ()
-  "The named face foreground equals the palette color for that nick.
-This is the non-breaking guarantee: colors are unchanged, only named."
+(ert-deftest clatter-hl-nick-face-inherits-base-face ()
+  "Each named nick face inherits from its palette base face.
+This is the theme-driven guarantee: the nick color follows whatever the
+active theme gives the base face, instead of a hardcoded hex."
   (clatter-hl-rebuild-nick-faces)
   (dolist (nick '("alice" "bob" "knighthk" "Carol"))
     (let* ((face (clatter-hl-nick-face-symbol nick))
-           (expected (nth (clatter-hl-nick-index nick) clatter-hl-nick-colors)))
-      (should (equal (face-attribute face :foreground nil t) expected))
-      (should (equal (clatter-hl-nick-color nick) expected)))))
+           (expected (nth (clatter-hl-nick-index nick)
+                          clatter-hl-nick-base-faces)))
+      (should (eq (face-attribute face :inherit nil t) expected))
+      ;; `clatter-hl-nick-color' must report the base face's resolved
+      ;; foreground (the color the user actually sees) for compatibility
+      ;; callers.
+      (should (equal (clatter-hl-nick-color nick)
+                     (face-foreground expected nil t))))))
 
 (ert-deftest clatter-hl-rebuild-nick-faces-covers-palette ()
   "Rebuilding defines one face per palette entry."
   (clatter-hl-rebuild-nick-faces)
-  (dotimes (i (length clatter-hl-nick-colors))
+  (dotimes (i (length clatter-hl-nick-base-faces))
     (should (facep (intern (format "clatter-nick-color-%d" i))))))
 
 (ert-deftest clatter-hl-rebuild-nick-faces-preserves-without-force ()
   "Without FORCE, an existing customized face is not overwritten."
-  (let ((face (intern "clatter-nick-color-0")))
+  (let ((face (intern "clatter-nick-color-0"))
+        (base (nth 0 clatter-hl-nick-base-faces)))
     (clatter-hl-rebuild-nick-faces t)
-    (set-face-attribute face nil :foreground "#010203")
+    (set-face-attribute face nil :inherit 'shadow)
     (clatter-hl-rebuild-nick-faces)            ; no force: must not reset
-    (should (equal (face-attribute face :foreground nil t) "#010203"))
-    ;; force: refreshes back to the palette color
+    (should (eq (face-attribute face :inherit nil t) 'shadow))
+    ;; force: refreshes back to the palette base face
     (clatter-hl-rebuild-nick-faces t)
-    (should (equal (face-attribute face :foreground nil t)
-                   (nth 0 clatter-hl-nick-colors)))))
+    (should (eq (face-attribute face :inherit nil t) base))))
 
 (provide 'test-hl-nicks)
 

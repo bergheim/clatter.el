@@ -67,7 +67,7 @@
     (insert (propertize (format " %d members\n"
                                 (length nicks))
                         'face 'bold))
-    (insert (propertize (make-string (1- clatter-nicklist-width) ?-) 'face 'shadow)
+    (insert (propertize (make-string (1- clatter-nicklist-width) ?-) 'face 'font-lock-doc-face)
             "\n")
     ;; Display sorted nicks by rank
     (setq nicks
@@ -88,8 +88,7 @@
 
 (defun clatter-nicklist--insert-nick (nick prefix _conn)
   "Insert NICK with PREFIX into the nicklist buffer."
-  (let* ((color (clatter-hl-nick-color nick))
-         (prefix-face (cond
+  (let* ((prefix-face (cond
                        ((string-search "@" prefix) 'clatter-system)
                        ((string-search "+" prefix) 'clatter-notice)
                        (t nil)))
@@ -98,7 +97,7 @@
                 (propertize prefix-str 'face prefix-face)
               prefix-str)
             " "
-            (propertize nick 'face (list :foreground color)
+            (propertize nick 'face (clatter-hl-nick-face-symbol nick)
                         'clatter-nick nick)
             "\n")))
 
