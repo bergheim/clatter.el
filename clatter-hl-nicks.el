@@ -59,7 +59,7 @@ Each entry is a string.  Matching is case-insensitive."
   :group 'clatter)
 
 (defface clatter-hl-keyword
-  '((t :background "#4a3000" :foreground "#ffcb6b" :weight bold))
+  '((t :inherit match :weight bold))
   "Face for highlighted keywords in messages."
   :group 'clatter)
 
@@ -265,7 +265,7 @@ Returns `clatter-my-nick' for our own nick, otherwise a named
                            'category 'default-button
                            'follow-link t
                            'clatter-url url
-                           'face '(:foreground "#89ddff" :underline t)
+                           'face 'link
                            'help-echo url
                            'action (lambda (button)
                                      (browse-url
