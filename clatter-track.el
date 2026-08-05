@@ -127,22 +127,22 @@ so the crumbs appear everywhere.  Setting this through Customize or
 ;; --- Faces ---
 
 (defface clatter-track-mention
-  '((t :foreground "#ff5370" :weight bold))
+  '((t :inherit font-lock-warning-face :weight bold))
   "Face for channels with unread mentions."
   :group 'clatter)
 
 (defface clatter-track-activity
-  '((t :foreground "#c3e88d"))
+  '((t :inherit font-lock-string-face))
   "Face for channels with unread messages."
   :group 'clatter)
 
 (defface clatter-track-muted
-  '((t :foreground "#7c7c7c"))
+  '((t :inherit shadow))
   "Face for muted channels with activity."
   :group 'clatter)
 
 (defface clatter-track-dm
-  '((t :foreground "#ffcb6b" :weight bold))
+  '((t :inherit font-lock-constant-face :weight bold))
   "Face for DM buffers with unread messages."
   :group 'clatter)
 

@@ -85,26 +85,35 @@ Each entry is a string.  Matching is case-insensitive."
           (setq result new-result)))
       result)))
 
-;; --- Expanded color palette ---
+;; --- Nick color palette (theme-driven) ---
+;;
+;; Nicks inherit from a rotating list of standard Emacs faces (font-lock-* and
+;; friends) so their colors follow the active theme and stay legible on both
+;; light and dark backgrounds.  Each palette entry becomes a real, named face
+;; `clatter-nick-color-N' (see `clatter-hl-rebuild-nick-faces') that inherits
+;; from the Nth base face here.
 
-(defcustom clatter-hl-nick-colors
-  '("#f78c6c" "#c3e88d" "#89ddff" "#c792ea" "#ffcb6b"
-    "#ff5370" "#82aaff" "#f07178" "#babed8" "#a6accd"
-    "#e2b93d" "#addb67" "#7fdbca" "#ef5350" "#80cbc4"
-    "#b2ccd6" "#eeffff" "#d4bfff" "#ffd580" "#bae67e"
-    "#5ccfe6" "#f29e74" "#d9f5dd" "#ffa7c4" "#c4e88e"
-    "#73d0ff" "#ff6e6e" "#ffe66d" "#a9dc76" "#78dce8"
-    "#ab9df2" "#fc9867" "#b8e986" "#ffd866" "#ff6188"
-    "#a9dc76" "#78dce8" "#ab9df2" "#e5c07b" "#56b6c2")
-  "Extended color palette for nick highlighting.
-40 colors chosen for good contrast on dark backgrounds."
-  :type '(repeat color)
+(defcustom clatter-hl-nick-base-faces
+  '(font-lock-keyword-face
+    font-lock-string-face
+    font-lock-type-face
+    font-lock-function-name-face
+    font-lock-variable-name-face
+    font-lock-constant-face
+    font-lock-builtin-face
+    font-lock-preprocessor-face
+    font-lock-warning-face
+    font-lock-comment-delimiter-face
+    font-lock-doc-face
+    font-lock-negation-char-face)
+  "Faces nicks inherit from, rotated by a hash of the nick.
+Each entry is a standard theme face (typically a `font-lock-*' face) whose
+foreground the active theme defines with a legible color.  Nicks are assigned
+deterministically by `clatter-hl-nick-index'.  Customize this list to change
+the palette; rebuild with `clatter-hl-rebuild-nick-faces' (prefix arg to
+refresh existing faces)."
+  :type '(repeat face)
   :group 'clatter)
-
-;; --- Color cache ---
-
-(defvar clatter--nick-color-cache (make-hash-table :test 'equal)
-  "Cache of nick -> color mappings for fast lookup.")
 
 (defun clatter-hl-nick-index (nick)
   "Return the palette index for NICK (deterministic, hash-based).
@@ -112,19 +121,15 @@ Uses the canonical nick from `clatter-hl-nicks-alias-alist' if present."
   (let* ((canonical (or (cdr (assoc nick clatter-hl-nicks-alias-alist))
                         nick))
          (hash (cl-reduce #'+ (mapcar #'identity (downcase canonical)))))
-    (mod hash (length clatter-hl-nick-colors))))
+    (mod hash (length clatter-hl-nick-base-faces))))
 
 (defun clatter-hl-nick-color (nick)
-  "Return a stable color for NICK.
-Uses canonical nick from `clatter-hl-nicks-alias-alist' if present.
-Colors are deterministic based on a hash of the nick string."
-  (let* ((canonical (or (cdr (assoc nick clatter-hl-nicks-alias-alist))
-                        nick))
-         (cached (gethash canonical clatter--nick-color-cache)))
-    (or cached
-        (let ((color (nth (clatter-hl-nick-index nick) clatter-hl-nick-colors)))
-          (puthash canonical color clatter--nick-color-cache)
-          color))))
+  "Return the resolved foreground color of NICK's highlight face.
+This is a compatibility helper for callers that want a literal color; prefer
+`clatter-hl-nick-face-symbol' for text properties so the face (and thus the
+theme) is honored.  Returns `unspecified' when the active theme gives the
+underlying base face no explicit foreground."
+  (face-foreground (clatter-hl-nick-face-symbol nick) nil t))
 
 ;; --- Named nick faces ---
 ;;
@@ -138,27 +143,26 @@ Colors are deterministic based on a hash of the nick string."
   (intern (format "clatter-nick-color-%d" idx)))
 
 (defun clatter-hl-rebuild-nick-faces (&optional force)
-  "Define a named face for each color in `clatter-hl-nick-colors'.
-Face `clatter-nick-color-N' uses the Nth palette color as a bold
-foreground.  Existing faces are left alone unless FORCE is non-nil (as
-when called interactively), so user or theme customizations are
-preserved across reloads; call with a prefix arg to refresh them after
-changing the palette."
+  "Define a named face for each entry in `clatter-hl-nick-base-faces'.
+Face `clatter-nick-color-N' inherits from the Nth base face and is bold.
+Existing faces are left alone unless FORCE is non-nil (as when called
+interactively), so user or theme customizations are preserved across
+reloads; call with a prefix arg to refresh them after changing the palette."
   (interactive (list t))
   (let ((idx 0))
-    (dolist (color clatter-hl-nick-colors)
+    (dolist (base clatter-hl-nick-base-faces)
       (let ((face (clatter-hl--nick-face-name idx)))
         (cond
          ;; New face: declare it so it is themeable and shows up in Customize.
          ((not (facep face))
           (custom-declare-face
-           face `((t (:foreground ,color :weight bold)))
-           (format "Clatter nick highlight color %d." idx)
+           face `((t (:inherit ,base :weight bold)))
+           (format "Clatter nick highlight color %d (inherits %s)." idx base)
            :group 'clatter))
          ;; Existing face: only overwrite when explicitly forced, so user or
          ;; theme customizations survive normal reloads.
          (force
-          (set-face-attribute face nil :foreground color :weight 'bold))))
+          (set-face-attribute face nil :inherit base :weight 'bold))))
       (setq idx (1+ idx)))))
 
 (defun clatter-hl-nick-face-symbol (nick)

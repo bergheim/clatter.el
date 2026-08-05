@@ -29,8 +29,12 @@
 (defvar-local clatter--last-formatted-timestamp nil
   "Last formatted message timestamp in the current Clatter buffer.")
 
+;; Clatter faces inherit from standard theme faces (font-lock-*, shadow,
+;; error, success) rather than hardcoding hex colors, so they stay legible
+;; across light and dark Emacs themes and adapt automatically on `load-theme'.
+
 (defface clatter-timestamp
-  '((t :foreground "#7c7c7c"))
+  '((t :inherit shadow))
   "Face for message timestamps."
   :group 'clatter)
 
@@ -40,81 +44,59 @@
   :group 'clatter)
 
 (defface clatter-my-nick
-  '((t :foreground "#c792ea" :weight bold))
+  '((t :inherit font-lock-constant-face :weight bold))
   "Face for your own nick."
   :group 'clatter)
 
 (defface clatter-action
-  '((t :foreground "#c3e88d" :slant italic))
+  '((t :inherit font-lock-string-face :slant italic))
   "Face for /me action messages."
   :group 'clatter)
 
 (defface clatter-notice
-  '((t :foreground "#ffcb6b"))
+  '((t :inherit font-lock-type-face))
   "Face for NOTICE messages."
   :group 'clatter)
 
 (defface clatter-reaction
-  '((t :foreground "#ffcb6b"))
+  '((t :inherit font-lock-type-face))
   "Face for reactions."
   :group 'clatter)
 
 (defface clatter-system
-  '((t :foreground "#546e7a"))
+  '((t :inherit font-lock-comment-face))
   "Face for system/status messages."
   :group 'clatter)
 
 (defface clatter-error
-  '((t :foreground "#ff5370" :weight bold))
+  '((t :inherit error :weight bold))
   "Face for error messages."
   :group 'clatter)
 
 (defface clatter-prompt
-  '((t :foreground "#82aaff" :weight bold))
+  '((t :inherit font-lock-keyword-face :weight bold))
   "Face for the input prompt."
   :group 'clatter)
 
 (defface clatter-mention
-  '((t :foreground "#ff5370" :weight bold))
+  '((t :inherit font-lock-warning-face :weight bold))
   "Face for highlighted mentions of your nick."
   :group 'clatter)
 
 (defface clatter-channel
-  '((t :foreground "#89ddff"))
+  '((t :inherit font-lock-builtin-face))
   "Face for channel names."
   :group 'clatter)
 
 (defface clatter-muted-reaction
   '((t :strike-through t))
   "Face for muted reactions."
-  :group 'clatted)
+  :group 'clatter)
 
 (defface clatter-bot-label-face
-  '((t :foreground "#ffcb6b"))
+  '((t :inherit font-lock-preprocessor-face))
   "Face used for the bot label."
   :group 'clatter)
-;; --- Nick color palette (hash-based consistent colors) ---
-
-(defcustom clatter-nick-colors
-  '("#f78c6c" "#c3e88d" "#89ddff" "#c792ea" "#ffcb6b"
-    "#ff5370" "#82aaff" "#f07178" "#babed8" "#a6accd"
-    "#e2b93d" "#addb67" "#7fdbca" "#ef5350" "#80cbc4"
-    "#b2ccd6" "#eeffff" "#f78c6c" "#c792ea" "#ff5370")
-  "Color palette for nick colorization."
-  :type '(repeat color)
-  :group 'clatter)
-
-(defun clatter-nick-color (nick)
-  "Return a consistent color for NICK based on hash."
-  (let* ((hash (cl-reduce #'+ (mapcar #'identity nick)))
-         (idx (mod hash (length clatter-nick-colors))))
-    (nth idx clatter-nick-colors)))
-
-(defun clatter-nick-face (nick conn)
-  "Return face properties for NICK on CONN."
-  (if (string-equal nick (clatter-connection-nick conn))
-      'clatter-my-nick
-    (list :foreground (clatter-nick-color nick) :weight 'bold)))
 
 ;; --- Bot label ---
 

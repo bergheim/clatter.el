@@ -55,7 +55,7 @@ Fool messages are still displayed with the `clatter-fool' face."
 ;; --- Faces ---
 
 (defface clatter-pal
-  '((t :foreground "#42be65" :weight bold))
+  '((t :inherit success :weight bold))
   "Face used to highlight a pal's nick."
   :group 'clatter)
 
