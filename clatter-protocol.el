@@ -444,6 +444,20 @@ The last param is treated as trailing if it contains spaces."
       (apply #'clatter-format-line "MODE" target mode args)
     (clatter-format-line "MODE" target)))
 
+(defun clatter-irc-mode-set (channel flag nicks)
+  "Format a grouped MODE for CHANNEL applying FLAG to each of NICKS.
+FLAG is a signed mode string such as \"+o\" or \"-v\".  The mode letter
+is repeated once per nick so multiple targets share one MODE line,
+e.g. (clatter-irc-mode-set \"#c\" \"+o\" (list \"a\" \"b\" \"c\")) =>
+\"MODE #c +ooo a b c\".  NICKS may also be ban masks (for \"+b\"/\"-b\")."
+  (if (null nicks)
+      (clatter-format-line "MODE" channel flag)
+    (let* ((sign (substring flag 0 1))
+           (letter (substring flag 1))
+           (combined (concat sign (make-string (length nicks)
+                                               (string-to-char letter)))))
+      (apply #'clatter-format-line "MODE" channel combined nicks))))
+
 (defun clatter-irc-away (&optional message)
   "Format AWAY command.  If MESSAGE is nil, clears away."
   (if (and message (> (length message) 0))
@@ -483,6 +497,72 @@ The last param is treated as trailing if it contains spaces."
 (defun clatter-irc-monitor-status ()
   "Format MONITOR S (request status)."
   "MONITOR S")
+
+;; --- Server query commands ---
+
+(defun clatter-irc-who (&optional target)
+  "Format WHO for optional TARGET."
+  (if (and target (not (string-empty-p target)))
+      (clatter-format-line "WHO" target)
+    (clatter-format-line "WHO")))
+
+(defun clatter-irc-whowas (nick)
+  "Format WHOWAS query for NICK."
+  (clatter-format-line "WHOWAS" nick))
+
+(defun clatter-irc-ison (nicks)
+  "Format ISON for a list of NICKS."
+  (apply #'clatter-format-line "ISON" nicks))
+
+(defun clatter-irc-links (&optional mask)
+  "Format LINKS for optional server MASK."
+  (if mask
+      (clatter-format-line "LINKS" mask)
+    (clatter-format-line "LINKS")))
+
+(defun clatter-irc-stats (query &optional target)
+  "Format STATS QUERY (e.g. \"u\") for optional TARGET server."
+  (if target
+      (clatter-format-line "STATS" query target)
+    (clatter-format-line "STATS" query)))
+
+(defun clatter-irc-admin (&optional target)
+  "Format ADMIN for optional TARGET server."
+  (if target
+      (clatter-format-line "ADMIN" target)
+    (clatter-format-line "ADMIN")))
+
+(defun clatter-irc-info (&optional target)
+  "Format INFO for optional TARGET server."
+  (if target
+      (clatter-format-line "INFO" target)
+    (clatter-format-line "INFO")))
+
+(defun clatter-irc-version (&optional target)
+  "Format VERSION request for optional TARGET server."
+  (if target
+      (clatter-format-line "VERSION" target)
+    (clatter-format-line "VERSION")))
+
+(defun clatter-irc-lusers (&optional mask target)
+  "Format LUSERS for optional MASK and TARGET server."
+  (cond
+   (target (clatter-format-line "LUSERS" mask target))
+   (mask   (clatter-format-line "LUSERS" mask))
+   (t      (clatter-format-line "LUSERS"))))
+
+(defun clatter-irc-motd (&optional target)
+  "Format MOTD request for optional TARGET server."
+  (if target
+      (clatter-format-line "MOTD" target)
+    (clatter-format-line "MOTD")))
+
+(defun clatter-irc-rules (&optional target)
+  "Format RULES request for optional TARGET server.
+RULES is not universally supported; some daemons reject it."
+  (if target
+      (clatter-format-line "RULES" target)
+    (clatter-format-line "RULES")))
 
 ;; --- CTCP ---
 

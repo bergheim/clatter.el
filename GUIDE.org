@@ -340,10 +340,44 @@ several reactions at the same message. Clatter clears it automatically after a
 | =/topic [new topic]=  | View or set channel topic              |
 | =/kick nick [reason]= | Kick a user from channel               |
 | =/mode [modes]=       | View or set channel/user modes         |
+| =/op nick [nick...]=    | Grant channel op (=+o=)              |
+| =/deop nick [nick...]=  | Remove channel op (=-o=)             |
+| =/voice nick [nick...]= | Grant voice (=+v=)                   |
+| =/devoice nick [nick...]= | Remove voice (=-v=)                |
+| =/hop nick [nick...]=   | Grant halfop (=+h=)                  |
+| =/dehop nick [nick...]= | Remove halfop (=-h=)                 |
+| =/quiet nick [nick...]= | Quiet a user (=+q=, semantics vary by server) |
+| =/unquiet nick [nick...]= | Unquiet a user (=-q=)              |
+| =/ban nick|mask [more...]= | Ban a user (=+b=); bare nicks become =nick!*@*= |
+| =/unban nick|mask [more...]= | Remove a ban (=-b=)             |
 | =/invite nick=        | Invite user to current channel         |
 | =/names=              | List channel members (alias: =/members=) |
 | =/nick newnick=       | Change your nickname                   |
 | =/away [message]=     | Set or clear away status               |
+
+Each mode helper applies its flag to every nick given and groups them into a
+single =MODE= line (e.g. =/op a b c= sends =MODE #chan +ooo a b c=).  They must
+be run from the channel buffer; use =/mode= or =/raw= for other targets.  Quiet
+semantics differ by daemon (ircd-seven/InspIRCd use =+q nick=; others use
+=+b %nick!*@*= or a services command), so =/quiet= uses the common =+q= form.
+
+** Server Queries
+
+| Command           | Description                                         |
+|-------------------+----------------------------------------------------|
+| =/who [target]=     | List users on a channel or matching a mask       |
+| =/whowas [nick]=   | Look up a nick no longer online (defaults to own) |
+| =/ison nick...=     | Check which nicks are online                       |
+| =/links [mask]=     | List server links                                  |
+| =/stats query [target]= | Server statistics (query letter, e.g. =u=)   |
+| =/admin [target]=   | Server admin info                                  |
+| =/info [target]=    | Server info                                         |
+| =/version [target]= | Server version                                       |
+| =/lusers [mask [target]]= | User/server counts                            |
+| =/motd [target]=    | Message of the day                                  |
+| =/rules [target]=   | Server rules (not universally supported)           |
+
+Replies appear in the network's =*server*= buffer.
 
 ** Services and Nick Recovery
 

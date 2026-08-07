@@ -10,6 +10,7 @@
 (require 'ert)
 (require 'test-helper)
 (require 'clatter-ui)
+(require 'clatter-commands)
 
 (defmacro clatter-input-test--with (order &rest body)
   "Run BODY in a fresh clatter-mode buffer with message ORDER and a prompt."
@@ -480,6 +481,139 @@ positions or it deletes the wrong (message) text."
   (let ((buffer-undo-list (list 10 (cons 5 8))))
     (clatter--update-undo-list 0)
     (should (equal buffer-undo-list (list 10 (cons 5 8))))))
+
+;; --- Slash command dispatch ---
+
+(defmacro clatter-cmd-test--with-channel (target &rest body)
+  "Run BODY in a temp clatter buffer on network \"testnet\" with TARGET.
+A mock connection is registered; `clatter-send' is mocked to capture lines."
+  (declare (indent 1))
+  `(let ((conn (clatter-test-make-connection "testnet" "alice")))
+     (unwind-protect
+         (with-temp-buffer
+           (clatter-mode)
+           (setq-local clatter--network "testnet")
+           (setq-local clatter--target ,target)
+           (clatter-test-with-mock-send
+             ,@body))
+       (remhash (clatter-connection-network-id conn) clatter-connections))))
+
+(ert-deftest clatter-cmd-raw-echoes-sent-line ()
+  "/raw echoes the sent line into the originating buffer."
+  (let ((conn (clatter-test-make-connection "testnet" "alice")))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-mode)
+          (setq-local clatter--network "testnet")
+          (setq-local clatter--target "#test")
+          (clatter--setup-prompt (current-buffer))
+          (let (sys)
+            (cl-letf (((symbol-function 'clatter-send)
+                       (lambda (&rest _) t))
+                      ((symbol-function 'clatter-insert-system)
+                       (lambda (_buffer text &optional _invisible)
+                         (push text sys))))
+              (clatter-cmd-raw "PING irc.libera.chat"))
+            (should (equal (car sys) ">> PING irc.libera.chat"))))
+      (remhash (clatter-connection-network-id conn) clatter-connections))))
+
+(ert-deftest clatter-cmd-raw-no-args-errors ()
+  "/raw with no args shows usage and sends nothing."
+  (clatter-cmd-test--with-channel "#test"
+    (let (err)
+      (cl-letf (((symbol-function 'clatter-insert-error)
+                 (lambda (_buffer text) (push text err))))
+        (clatter-cmd-raw ""))
+      (should (null clatter-test--sent-lines))
+      (should (string-match-p "Usage" (car err))))))
+
+(ert-deftest clatter-cmd-mode-explicit-channel-not-duplicated ()
+  "/mode #chan +b in a channel buffer must not send the channel twice.
+Sending \"MODE #chan #chan +b\" makes the server read the second channel
+as the mode string and reply 472 (unknown mode char)."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-mode "#chan +b")
+    (should (equal (clatter-test-last-sent) "MODE #chan +b"))))
+
+(ert-deftest clatter-cmd-mode-implicit-channel-uses-buffer-target ()
+  "/mode +b in a channel buffer targets that channel.
+A leading + is also a valid channel prefix, so the mode string must not
+be mistaken for an explicit channel argument."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-mode "+b")
+    (should (equal (clatter-test-last-sent) "MODE #chan +b"))))
+
+(ert-deftest clatter-cmd-mode-explicit-other-channel ()
+  "/mode #other +b mask targets the named channel, not the buffer's."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-mode "#other +b mask!*@*")
+    (should (equal (clatter-test-last-sent) "MODE #other +b mask!*@*"))))
+
+(ert-deftest clatter-cmd-mode-bare-in-channel-queries-channel ()
+  "/mode with no args in a channel buffer queries that channel's modes."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-mode "")
+    (should (equal (clatter-test-last-sent) "MODE #chan"))))
+
+(ert-deftest clatter-cmd-op-groups-modes ()
+  "/op with several nicks sends a grouped MODE line."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-op "alice bob carol")
+    (should (equal (clatter-test-last-sent) "MODE #chan +ooo alice bob carol"))))
+
+(ert-deftest clatter-cmd-op-single ()
+  "/op with one nick sends a single +o."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-op "alice")
+    (should (equal (clatter-test-last-sent) "MODE #chan +o alice"))))
+
+(ert-deftest clatter-cmd-op-no-nicks-errors ()
+  "/op with no nicks shows usage and sends nothing."
+  (clatter-cmd-test--with-channel "#chan"
+    (let (err)
+      (cl-letf (((symbol-function 'clatter-insert-error)
+                 (lambda (_buffer text) (push text err))))
+        (clatter-cmd-op ""))
+      (should (null clatter-test--sent-lines))
+      (should (string-match-p "Usage" (car err))))))
+
+(ert-deftest clatter-cmd-op-in-server-buffer-errors ()
+  "/op outside a channel buffer shows usage and sends nothing."
+  (clatter-cmd-test--with-channel "*server*"
+    (let (err)
+      (cl-letf (((symbol-function 'clatter-insert-error)
+                 (lambda (_buffer text) (push text err))))
+        (clatter-cmd-op "alice"))
+      (should (null clatter-test--sent-lines))
+      (should (string-match-p "channel buffer" (car err))))))
+
+(ert-deftest clatter-cmd-ban-wildcards-bare-nick ()
+  "/ban wildcards a bare nick to nick!*@*."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-ban "alice")
+    (should (equal (clatter-test-last-sent) "MODE #chan +b alice!*@*"))))
+
+(ert-deftest clatter-cmd-ban-keeps-mask ()
+  "/ban leaves an explicit mask unchanged."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-ban "*!*@evil.host")
+    (should (equal (clatter-test-last-sent) "MODE #chan +b *!*@evil.host"))))
+
+(ert-deftest clatter-cmd-server-queries-send-expected-lines ()
+  "Server-query commands send the right protocol lines."
+  (clatter-cmd-test--with-channel "#chan"
+    (clatter-cmd-who "")
+    (should (equal (clatter-test-last-sent) "WHO"))
+    (clatter-cmd-who "#chan")
+    (should (equal (clatter-test-last-sent) "WHO #chan"))
+    (clatter-cmd-motd "")
+    (should (equal (clatter-test-last-sent) "MOTD"))
+    (clatter-cmd-stats "u")
+    (should (equal (clatter-test-last-sent) "STATS u"))
+    (clatter-cmd-stats "u irc.net")
+    (should (equal (clatter-test-last-sent) "STATS u irc.net"))
+    (clatter-cmd-ison "a b")
+    (should (equal (clatter-test-last-sent) "ISON a b"))))
 
 (provide 'test-input)
 

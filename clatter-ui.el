@@ -2095,9 +2095,13 @@ the buffer margin-width variables."
                       '(noise))))))))
 
 (defun clatter-ui--on-motd (conn lines)
-  "Display MOTD LINES on CONN in the server buffer."
+  "Display MOTD LINES on CONN.
+Routes to the buffer that requested the MOTD via /motd when live; the
+server buffer otherwise (e.g. the connect-time MOTD)."
   (let* ((network (clatter-connection-network-id conn))
-         (buf (or (clatter-get-server-buffer network)
+         (query-buf (clatter--query-target conn))
+         (buf (or query-buf
+                  (clatter-get-server-buffer network)
                   (clatter-get-or-create-buffer network "*server*" 'server))))
     (clatter-ui-setup-buffer-if-needed buf)
     (clatter-insert-system buf "--- MOTD ---")
@@ -2105,10 +2109,16 @@ the buffer margin-width variables."
       (clatter-insert-system buf (clatter-hl-urls-in-string (clatter-format-parse line)) nil))
     (clatter-insert-system buf "--- End of MOTD ---")))
 
-(defun clatter-ui--on-whois (_conn nick data)
-  "Handle WHOIS reply for UI: display NICK info from DATA in current buffer."
-  (let ((buf (current-buffer))
-        (parts nil))
+(defun clatter-ui--on-whois (conn nick data)
+  "Handle WHOIS reply for UI: display NICK info from DATA.
+Routes to the buffer that issued /whois when live; the server buffer
+otherwise (the process filter may run in any buffer, so don't rely on
+`current-buffer')."
+  (let* ((network (clatter-connection-network-id conn))
+         (buf (or (clatter--query-target conn)
+                  (clatter-get-server-buffer network)
+                  (current-buffer)))
+         (parts nil))
     (push (format "WHOIS %s (%s@%s)"
                   nick
                   (or (plist-get data :user) "?")
@@ -2297,9 +2307,87 @@ COMMAND is the CTCP type (VERSION, PING, etc.), REPLY-TEXT is the response."
 
 ;; --- Handlers for other numerics ---
 
+(defconst clatter--query-reply-numerics
+  '("303"  ; RPL_ISON
+    "314"  ; RPL_WHOWASUSER
+    "315"  ; RPL_ENDOFWHO
+    "351"  ; RPL_VERSION
+    "352"  ; RPL_WHOREPLY
+    "364"  ; RPL_LINKS
+    "365"  ; RPL_ENDOFLINKS
+    "369"  ; RPL_ENDOFWHOWAS
+    "371"  ; RPL_INFO
+    "374"  ; RPL_ENDOFINFO
+    "210" "211" "212" "213" "214" "215" "216" "217" "218" "219" "220"
+    "240" "241" "242" "243" "244" "245" "246" "247" "248" "249" "250"
+    "256" "257" "258" "259"               ; RPL_ADMIN*
+    "251" "252" "253" "254" "255" "265" "266")  ; RPL_LUSER* (also welcome burst)
+  "Numeric replies that belong to user-initiated query commands.
+When `clatter-connection-last-query-buffer' is live, these route to that
+buffer instead of the server buffer.  The welcome burst sends several of
+these (251-266) too, but `last-query-buffer' is nil then so they still go
+to the server buffer.")
+
+(defconst clatter--query-end-numerics
+  '("219"  ; RPL_ENDOFSTATS
+    "315"  ; RPL_ENDOFWHO
+    "365"  ; RPL_ENDOFLINKS
+    "369"  ; RPL_ENDOFWHOWAS
+    "374"  ; RPL_ENDOFINFO
+    "376" "422")  ; RPL_ENDOFMOTD, ERR_NOMOTD
+  "Numerics that terminate a query reply set.
+Receiving one clears `clatter-connection-last-query-buffer' so that
+later unsolicited replies of the same kind (e.g. the automatic WHO issued
+on rejoin) fall back to the server buffer instead of being routed into
+whichever buffer last issued a query command.")
+
+(defun clatter--query-target (conn)
+  "Return the live buffer to route query replies to on CONN, or nil.
+Falls back to nil so callers use the normal server-buffer routing."
+  (let ((buf (clatter-connection-last-query-buffer conn)))
+    (and buf (buffer-live-p buf) buf)))
+
+(defun clatter--internal-whox-reply-p (conn command params)
+  "Return non-nil if COMMAND/PARAMS is a reply to an internal WHOX on CONN.
+`clatter-send-whox' fires automatically for every channel on each
+RPL_ENDOFNAMES, so its 352/315 replies must be consumed silently instead
+of flooding a buffer.  Clears the pending entry on the terminating 315."
+  (let ((channel (nth 1 params)))
+    (and channel
+         (member (downcase channel) (clatter-connection-pending-whox conn))
+         (cond
+          ;; 315 terminates the reply set: consume it and forget the channel.
+          ((string= command "315")
+           (setf (clatter-connection-pending-whox conn)
+                 (delete (downcase channel)
+                         (clatter-connection-pending-whox conn)))
+           t)
+          ;; 352/354 bodies for that same in-flight query.
+          ((member command '("352" "354")) t)))))
+
 (defun clatter-ui--on-numeric (conn command params)
   "Handle informational and MODE-related numerics for UI.
 COMMAND is the numeric reply code, PARAMS its parameters on CONN."
+  (cl-block clatter-ui--on-numeric
+    ;; Route replies to user-initiated query commands (/who, /stats,
+    ;; /lusers, ...) to the buffer the command was typed in, when it is
+    ;; still live.  Falls through to the pcase below otherwise (e.g. the
+    ;; welcome burst, where `last-query-buffer' is nil).
+    ;; Replies to the automatic per-channel WHOX are internal bookkeeping
+    ;; (account names); never display them.
+    (when (clatter--internal-whox-reply-p conn command params)
+      (cl-return-from clatter-ui--on-numeric))
+    (let ((query-buf (clatter--query-target conn)))
+      (when (and query-buf
+                 (member command clatter--query-reply-numerics))
+        ;; A terminating numeric ends the query: stop routing so later
+        ;; unsolicited replies go to the server buffer instead of piling up
+        ;; in whatever buffer last ran a query command.
+        (when (member command clatter--query-end-numerics)
+          (setf (clatter-connection-last-query-buffer conn) nil))
+        (clatter-insert-system
+         query-buf (format "[%s] %s" command (string-join (cdr params) " ")))
+        (cl-return-from clatter-ui--on-numeric)))
   (pcase command
     ;; --- Informational numerics ---
     ((or "001" "002" "003" "004" "242" "251" "252" "253" "254" "255"
@@ -2346,8 +2434,40 @@ COMMAND is the numeric reply code, PARAMS its parameters on CONN."
     ((or "401" "403"  ; ERR_NOSUCHNICK, ERR_NOSUCHCHANNEL
          "404"        ; ERR_CANNOTSENDTOCHAN
          "475")       ; ERR_BADCHANNELKEY
-     (let ((buf (current-buffer)))
-       (clatter-insert-system buf (string-join (reverse (cdr params)) " "))))))
+     ;; Route to the buffer named by the reply's target param (a query
+     ;; buffer for 401's nick, a channel buffer for the others), falling
+     ;; back to the server buffer.  Do not use (current-buffer): the
+     ;; process filter may run in any buffer.
+     (let* ((network (clatter-connection-network-id conn))
+            (target (nth 1 params))
+            (buf (or (clatter-get-buffer network target)
+                     (clatter-get-server-buffer network))))
+       (when buf
+         (clatter-insert-system buf (string-join (reverse (cdr params)) " ")))))
+    ("421"                            ; ERR_UNKNOWNCOMMAND
+     ;; The server rejected a command we sent.  If it was TAGMSG, the
+     ;; server (or an upstream behind a bouncer/bridge) ACKed message-tags
+     ;; but does not actually accept TAGMSG; remember that so outbound
+     ;; typing/reaction TAGMSGs stop rather than spamming 421s every
+     ;; keystroke.  Still display the error so the user sees it once.
+     (let ((rejected-cmd (nth 1 params)))
+       (when (string-equal (and rejected-cmd (upcase rejected-cmd)) "TAGMSG")
+         (setf (clatter-connection-tagmsg-rejected conn) t)))
+     (let* ((network (clatter-connection-network-id conn))
+            (buf (clatter-get-server-buffer network)))
+       (when buf
+         (clatter-insert-system
+          buf (format "[%s] %s" command (string-join (cdr params) " "))))))
+    ;; Catch-all: show any unhandled numeric (e.g. 421 ERR_UNKNOWNCOMMAND,
+    ;; 411/412/432/433/461/471-477 ...) in the server buffer instead of
+    ;; silently dropping it.
+    (_
+     (let* ((network (clatter-connection-network-id conn))
+            (buf (clatter-get-server-buffer network)))
+       (when buf
+         (clatter-insert-system
+          buf (format "[%s] %s" command (string-join (cdr params) " "))))))))
+  ) ;; end of pcase / cl-block clatter-ui--on-numeric
 
 ;; --- Channel preview on hover (eldoc) ---
 
@@ -2497,7 +2617,8 @@ Requires the server to support the message-tags capability."
        (let ((conn (clatter-get-connection clatter--network)))
          (and conn
               (member "message-tags"
-                      (clatter-connection-cap-enabled conn))))))
+                      (clatter-connection-cap-enabled conn))
+              (not (clatter-connection-tagmsg-rejected conn))))))
 
 (defun clatter--maybe-send-typing (&rest _)
   "Send a typing notification if in the input area and throttle allows."
