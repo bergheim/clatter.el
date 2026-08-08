@@ -325,7 +325,13 @@ Return nil when the ring is empty or N is out of range."
 
 (defun clatter-send-whox (conn channel)
   "Send WHOX query for CHANNEL on CONN if WHOX is supported.
-Uses format: WHO #channel %tcnuhraf,TOKEN to get account names."
+Uses format: WHO #channel %tcnuhraf,TOKEN to get account names.
+This is an internal, automatic query (sent on every RPL_ENDOFNAMES), so
+CHANNEL is recorded in `clatter-connection-pending-whox' and its replies
+are consumed silently rather than printed to a buffer."
+  (cl-pushnew (downcase channel)
+              (clatter-connection-pending-whox conn)
+              :test #'equal)
   (clatter-send conn (format "WHO %s %%tcnuhraf,%s"
                               channel clatter-whox-token)))
 

@@ -1619,6 +1619,134 @@ system messages."
             (should (clatter--typing-capable-p))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-typing-not-capable-when-tagmsg-rejected ()
+  "Typing suppressed once the server returned 421 for TAGMSG."
+  (let ((conn (clatter-test-make-connection)))
+    (unwind-protect
+        (progn
+          (setf (clatter-connection-tagmsg-rejected conn) t)
+          (with-temp-buffer
+            (setq-local clatter--network "testnet")
+            (setq-local clatter--target "#test")
+            (let ((clatter-send-typing t))
+              (should-not (clatter--typing-capable-p)))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-numeric-421-tagmsg-sets-flag-and-displays ()
+  "421 for TAGMSG sets the connection flag and still prints to the server buffer."
+  (clatter-test-with-ui-connection conn
+    (let (inserted)
+      (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+      (cl-letf (((symbol-function 'clatter-insert-system)
+                 (lambda (buffer text &optional _invisible)
+                   (push (cons buffer text) inserted))))
+        (clatter-ui--on-numeric conn "421"
+                                 '("testnick" "TAGMSG" "Unknown command")))
+      (should (clatter-connection-tagmsg-rejected conn))
+      (let ((server (clatter-get-server-buffer "testnet")))
+        (should server)
+        (should (cl-find-if (lambda (cell)
+                              (and (eq (car cell) server)
+                                   (string-match-p "\\[421\\].*TAGMSG"
+                                                   (cdr cell))))
+                            inserted))))))
+
+(ert-deftest clatter-test-numeric-421-other-command-no-flag ()
+  "421 for a non-TAGMSG command does not set the tagmsg-rejected flag."
+  (clatter-test-with-ui-connection conn
+    (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+    (cl-letf (((symbol-function 'clatter-insert-system)
+               (lambda (_buffer _text &optional _invisible))))
+      (clatter-ui--on-numeric conn "421"
+                               '("testnick" "FOOBAR" "Unknown command")))
+    (should-not (clatter-connection-tagmsg-rejected conn))))
+
+(ert-deftest clatter-test-numeric-query-reply-routes-to-origin-buffer ()
+  "A query-reply numeric routes to the buffer that issued the command.
+The process filter may run in an unrelated buffer, so routing must not
+rely on `current-buffer'."
+  (clatter-test-with-ui-connection conn
+    (let (inserted)
+      (let ((chan (clatter-get-or-create-buffer "testnet" "#test" 'channel)))
+        (setf (clatter-connection-last-query-buffer conn) chan)
+        (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+        (with-temp-buffer
+          (cl-letf (((symbol-function 'clatter-insert-system)
+                     (lambda (buffer text &optional _invisible)
+                       (push (cons buffer text) inserted))))
+            (clatter-ui--on-numeric conn "352"
+                                     '("testnick" "#test" "user" "host"
+                                       "server" "nick" "H" "0 real"))))
+        (should (cl-find-if (lambda (cell) (eq (car cell) chan)) inserted))
+        (should-not (cl-find-if (lambda (cell)
+                                  (not (eq (car cell) chan)))
+                                inserted))))))
+
+(ert-deftest clatter-test-numeric-query-reply-falls-to-server-when-no-origin ()
+  "Without a recorded origin (e.g. the welcome burst), query-reply
+numerics fall through to the server buffer."
+  (clatter-test-with-ui-connection conn
+    (let (inserted)
+      (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+      (cl-letf (((symbol-function 'clatter-insert-system)
+                 (lambda (buffer text &optional _invisible)
+                   (push (cons buffer text) inserted))))
+        (clatter-ui--on-numeric conn "251"
+                                 '("testnick" "3 4" "There are 3 users")))
+      (let ((server (clatter-get-server-buffer "testnet")))
+        (should server)
+        (should (cl-find-if (lambda (cell) (eq (car cell) server))
+                            inserted))))))
+
+(ert-deftest clatter-test-internal-whox-replies-not-displayed ()
+  "Replies to the automatic per-channel WHOX are consumed silently.
+`clatter-send-whox' fires on every RPL_ENDOFNAMES, so displaying its 315s
+floods the buffer with \"End of /WHO list\" on every rejoin."
+  (clatter-test-with-ui-connection conn
+    (let ((inserted nil)
+          (chans '("#erc" "#ircv3" "#guix")))
+      (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+      (setf (clatter-connection-last-query-buffer conn)
+            (clatter-get-or-create-buffer "testnet" "#clatter" 'channel))
+      (cl-letf (((symbol-function 'clatter-insert-system)
+                 (lambda (buffer text &optional _invisible)
+                   (push (cons buffer text) inserted)))
+                ((symbol-function 'clatter-send) (lambda (&rest _) nil)))
+        (dolist (c chans) (clatter-send-whox conn c))
+        (dolist (c chans)
+          (clatter-ui--on-numeric conn "315"
+                                   (list "testnick" c "End of /WHO list"))))
+      (should-not inserted)
+      ;; Each terminating 315 clears its pending entry.
+      (should-not (clatter-connection-pending-whox conn)))))
+
+(ert-deftest clatter-test-query-routing-cleared-by-end-numeric ()
+  "A terminating numeric stops query routing so it is not sticky.
+Otherwise every later unsolicited reply keeps landing in whichever buffer
+last ran a query command."
+  (clatter-test-with-ui-connection conn
+    (let ((inserted nil))
+      (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+      (let ((qb (clatter-get-or-create-buffer "testnet" "#clatter" 'channel)))
+        (setf (clatter-connection-last-query-buffer conn) qb)
+        (cl-letf (((symbol-function 'clatter-insert-system)
+                   (lambda (buffer text &optional _invisible)
+                     (push (cons buffer text) inserted))))
+          ;; A user /who: body then terminator, both shown in the origin.
+          (clatter-ui--on-numeric conn "352"
+                                   '("testnick" "#clatter" "u" "h" "s"
+                                     "nick" "H" "0 real"))
+          (clatter-ui--on-numeric conn "315"
+                                   '("testnick" "#clatter" "End of /WHO list"))
+          (should (cl-every (lambda (cell) (eq (car cell) qb)) inserted))
+          (should (null (clatter-connection-last-query-buffer conn)))
+          ;; A later unsolicited 315 now goes to the server buffer.
+          (setq inserted nil)
+          (clatter-ui--on-numeric conn "315"
+                                   '("testnick" "#erc" "End of /WHO list"))
+          (should (eq (car (car inserted))
+                      (clatter-get-server-buffer "testnet"))))))))
+
 ;; --- Notifications and read state ---
 
 (ert-deftest clatter-test-read-state-suppresses-read-notification ()
@@ -1679,6 +1807,43 @@ system messages."
   (should (memq #'clatter-nicklist--on-quit (default-value 'clatter-quit-hook)))
   (should (memq #'clatter-nicklist--on-nick (default-value 'clatter-nick-hook)))
   (should (memq #'clatter-nicklist--on-names (default-value 'clatter-names-hook))))
+
+;; --- Numeric reply routing ---
+
+(ert-deftest clatter-test-numeric-unhandled-goes-to-server ()
+  "An unhandled numeric (e.g. 421) prints to the server buffer, not dropped."
+  (clatter-test-with-ui-connection conn
+    (let (inserted)
+      (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+      (cl-letf (((symbol-function 'clatter-insert-system)
+                 (lambda (buffer text &optional _invisible)
+                   (push (cons buffer text) inserted))))
+        (clatter-ui--on-numeric conn "421"
+                                 '("testnick" "FOOBAR" "Unknown command")))
+      (let ((server (clatter-get-server-buffer "testnet")))
+        (should server)
+        (should (cl-find-if (lambda (cell)
+                              (and (eq (car cell) server)
+                                   (string-match-p "\\[421\\]" (cdr cell))))
+                            inserted))))))
+
+(ert-deftest clatter-test-numeric-403-routes-to-channel-buffer ()
+  "403 routes to the param-derived channel buffer, not (current-buffer)."
+  (clatter-test-with-ui-connection conn
+    (let (inserted)
+      (let ((chan (clatter-get-or-create-buffer "testnet" "#gone" 'channel)))
+        (with-temp-buffer
+          ;; current-buffer is a non-clatter temp buffer at filter time
+          (cl-letf (((symbol-function 'clatter-insert-system)
+                     (lambda (buffer text &optional _invisible)
+                       (push (cons buffer text) inserted))))
+            (clatter-ui--on-numeric conn "403"
+                                     '("testnick" "#gone" "No such channel"))))
+        (should (cl-find-if (lambda (cell) (eq (car cell) chan)) inserted))
+        ;; The temp buffer must never have been the target.
+        (should-not (cl-find-if (lambda (cell)
+                                  (not (eq (car cell) chan)))
+                                inserted))))))
 
 (provide 'test-ui)
 

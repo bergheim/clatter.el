@@ -194,6 +194,66 @@
   (should (equal (clatter-format-line "NICK" "newnick")
                  "NICK newnick")))
 
+;; --- Mode-set grouping ---
+
+(ert-deftest clatter-test-mode-set-single ()
+  "A single nick produces one mode flag."
+  (should (equal (clatter-irc-mode-set "#chan" "+o" '("alice"))
+                 "MODE #chan +o alice")))
+
+(ert-deftest clatter-test-mode-set-grouped ()
+  "Multiple nicks are grouped into repeated flags."
+  (should (equal (clatter-irc-mode-set "#chan" "+o" '("a" "b" "c"))
+                 "MODE #chan +ooo a b c"))
+  (should (equal (clatter-irc-mode-set "#chan" "-v" '("a" "b"))
+                 "MODE #chan -vv a b")))
+
+(ert-deftest clatter-test-mode-set-empty ()
+  "Empty nick list falls back to a bare flag."
+  (should (equal (clatter-irc-mode-set "#chan" "+o" nil)
+                 "MODE #chan +o")))
+
+(ert-deftest clatter-test-mode-set-masks ()
+  "Ban masks (with spaces) become a trailing param."
+  (should (equal (clatter-irc-mode-set "#chan" "+b"
+                                        '("alice!*@*" "bob!*@*"))
+                 "MODE #chan +bb alice!*@* bob!*@*")))
+
+;; --- Server query formatters ---
+
+(ert-deftest clatter-test-irc-who ()
+  (should (equal (clatter-irc-who) "WHO"))
+  (should (equal (clatter-irc-who "") "WHO"))
+  (should (equal (clatter-irc-who "#chan") "WHO #chan")))
+
+(ert-deftest clatter-test-irc-whowas ()
+  (should (equal (clatter-irc-whowas "bob") "WHOWAS bob")))
+
+(ert-deftest clatter-test-irc-ison ()
+  (should (equal (clatter-irc-ison '("a" "b")) "ISON a b"))
+  (should (equal (clatter-irc-ison '("a")) "ISON a")))
+
+(ert-deftest clatter-test-irc-links ()
+  (should (equal (clatter-irc-links) "LINKS"))
+  (should (equal (clatter-irc-links "*.net") "LINKS *.net")))
+
+(ert-deftest clatter-test-irc-stats ()
+  (should (equal (clatter-irc-stats "u") "STATS u"))
+  (should (equal (clatter-irc-stats "u" "irc.net") "STATS u irc.net")))
+
+(ert-deftest clatter-test-irc-admin/info/version/motd/rules ()
+  (should (equal (clatter-irc-admin) "ADMIN"))
+  (should (equal (clatter-irc-admin "irc.net") "ADMIN irc.net"))
+  (should (equal (clatter-irc-info) "INFO"))
+  (should (equal (clatter-irc-version) "VERSION"))
+  (should (equal (clatter-irc-motd) "MOTD"))
+  (should (equal (clatter-irc-rules "irc.net") "RULES irc.net")))
+
+(ert-deftest clatter-test-irc-lusers ()
+  (should (equal (clatter-irc-lusers) "LUSERS"))
+  (should (equal (clatter-irc-lusers "mask") "LUSERS mask"))
+  (should (equal (clatter-irc-lusers "mask" "irc.net") "LUSERS mask irc.net")))
+
 (provide 'test-protocol)
 
 ;;; test-protocol.el ends here

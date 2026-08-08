@@ -64,6 +64,13 @@ INPUT is the full string including the leading /."
         (clatter-insert-error (current-buffer) "Not connected")
         nil)))
 
+(defun clatter--remember-query-origin (conn)
+  "Record the current buffer as the originator of a query command on CONN.
+Reply numerics for /who, /stats, /motd, /whois, etc. are then routed here
+instead of the server buffer.  See `clatter-ui--on-numeric'."
+  (when conn
+    (setf (clatter-connection-last-query-buffer conn) (current-buffer))))
+
 ;; --- Commands ---
 
 (defun clatter-cmd-say (args)
@@ -177,13 +184,102 @@ INPUT is the full string including the leading /."
                 (setq mode-args rest)))
             (clatter-send conn (apply #'clatter-irc-mode target mode-args))))
          (other-target
-          ;; If we're in a channel buffer, assume TARGET is the channel.
-          (clatter-send conn (apply #'clatter-irc-mode target (string-split args " " t)))))))))
+          ;; In a channel buffer TARGET defaults to that channel, but an
+          ;; explicit channel may still lead the arguments (/mode #chan +b).
+          ;; Without this check the channel is sent twice ("MODE #c #c +b")
+          ;; and the server reads the second one as the mode string.
+          (let* ((parts (string-split args " " t))
+                 (head (car parts))
+                 ;; "+b"/"-o" are mode strings, not channels, even though
+                 ;; `clatter-channel-name-p' accepts a leading + as a valid
+                 ;; channel prefix.
+                 (explicit-channel (and head
+                                        (not (memq (aref head 0) '(?+ ?-)))
+                                        (clatter-channel-name-p head))))
+            (if explicit-channel
+                (clatter-send conn (apply #'clatter-irc-mode head (cdr parts)))
+              (clatter-send conn (apply #'clatter-irc-mode target parts))))))))))
+
+;; --- Channel-admin mode helpers (/op /deop /voice ...) ---
+
+(defun clatter--cmd-mode-flag (args flag label)
+  "Apply MODE FLAG (e.g. \"+o\") to nicks parsed from ARGS in this channel.
+LABEL is the command name used in usage messages."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (let ((channel clatter--target)
+            (nicks (split-string args " " t)))
+        (cond
+         ((or (null channel) (string= channel "*server*"))
+          (clatter-insert-error
+           (current-buffer)
+           (format "Usage: /%s nick... (use in a channel buffer)" label)))
+         ((null nicks)
+          (clatter-insert-error
+           (current-buffer)
+           (format "Usage: /%s nick [nick...]" label)))
+         (t
+          (clatter-send conn (clatter-irc-mode-set channel flag nicks))))))))
+
+(defun clatter--cmd-mode-mask (args flag label)
+  "Apply MODE FLAG (e.g. \"+b\") to masks parsed from ARGS in this channel.
+Bare nicks are wildcarded to nick!*@*.  LABEL is used in usage messages."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (let ((channel clatter--target)
+            (masks (mapcar (lambda (m)
+                             (if (string-match-p "[!*@]" m)
+                                 m
+                               (concat m "!*@*")))
+                           (split-string args " " t))))
+        (cond
+         ((or (null channel) (string= channel "*server*"))
+          (clatter-insert-error
+           (current-buffer)
+           (format "Usage: /%s mask... (use in a channel buffer)" label)))
+         ((null masks)
+          (clatter-insert-error
+           (current-buffer)
+           (format "Usage: /%s nick|mask [more...]" label)))
+         (t
+          (clatter-send conn (clatter-irc-mode-set channel flag masks))))))))
+
+(defun clatter-cmd-op (args)
+  "Give channel op to nicks in ARGS (\"+o\")."
+  (clatter--cmd-mode-flag args "+o" "op"))
+(defun clatter-cmd-deop (args)
+  "Remove channel op from nicks in ARGS (\"-o\")."
+  (clatter--cmd-mode-flag args "-o" "deop"))
+(defun clatter-cmd-voice (args)
+  "Give voice to nicks in ARGS (\"+v\")."
+  (clatter--cmd-mode-flag args "+v" "voice"))
+(defun clatter-cmd-devoice (args)
+  "Remove voice from nicks in ARGS (\"-v\")."
+  (clatter--cmd-mode-flag args "-v" "devoice"))
+(defun clatter-cmd-hop (args)
+  "Give halfop to nicks in ARGS (\"+h\")."
+  (clatter--cmd-mode-flag args "+h" "hop"))
+(defun clatter-cmd-dehop (args)
+  "Remove halfop from nicks in ARGS (\"-h\")."
+  (clatter--cmd-mode-flag args "-h" "dehop"))
+(defun clatter-cmd-quiet (args)
+  "Quiet nicks in ARGS (\"+q\").  Quiet semantics vary by server."
+  (clatter--cmd-mode-flag args "+q" "quiet"))
+(defun clatter-cmd-unquiet (args)
+  "Unquiet nicks in ARGS (\"-q\").  Quiet semantics vary by server."
+  (clatter--cmd-mode-flag args "-q" "unquiet"))
+(defun clatter-cmd-ban (args)
+  "Ban masks/nicks in ARGS (\"+b\").  Bare nicks become nick!*@*."
+  (clatter--cmd-mode-mask args "+b" "ban"))
+(defun clatter-cmd-unban (args)
+  "Remove bans for masks/nicks in ARGS (\"-b\")."
+  (clatter--cmd-mode-mask args "-b" "unban"))
 
 (defun clatter-cmd-whois (args)
   "Request WHOIS for the NICK in ARGS."
   (let ((conn (clatter--require-conn)))
     (when conn
+      (clatter--remember-query-origin conn)
       (let ((nick (car (split-string args))))
         (if (and nick (> (length nick) 0))
             (clatter-send conn (clatter-irc-whois nick))
@@ -205,12 +301,117 @@ INPUT is the full string including the leading /."
   (let ((network clatter--network))
     (clatter-disconnect network (if (string-empty-p args) nil args))))
 
+;; --- Server query commands ---
+
+(defun clatter-cmd-who (args)
+  "Request WHO for optional TARGET in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-who args)))))
+
+(defun clatter-cmd-whowas (args)
+  "Request WHOWAS for NICK in ARGS; defaults to our own nick."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (let ((nick (or (car (split-string args " " t))
+                      (clatter-connection-nick conn))))
+        (if (and nick (> (length nick) 0))
+            (clatter-send conn (clatter-irc-whowas nick))
+          (clatter-insert-error (current-buffer) "Usage: /whowas [nick]"))))))
+
+(defun clatter-cmd-ison (args)
+  "Request ISON for the nicks in ARGS."
+  (let ((conn (clatter--require-conn))
+        (nicks (split-string args " " t)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (if nicks
+          (clatter-send conn (clatter-irc-ison nicks))
+        (clatter-insert-error (current-buffer)
+                              "Usage: /ison nick [nick...]")))))
+
+(defun clatter-cmd-links (args)
+  "Request LINKS for optional MASK in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-links
+                          (unless (string-empty-p args) args))))))
+
+(defun clatter-cmd-stats (args)
+  "Request STATS QUERY for optional TARGET, both from ARGS."
+  (let ((conn (clatter--require-conn))
+        (parts (split-string args " " t)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (cond
+       ((null parts)
+        (clatter-insert-error (current-buffer) "Usage: /stats query [target]"))
+       (t
+        (clatter-send conn (clatter-irc-stats (car parts) (cadr parts))))))))
+
+(defun clatter-cmd-admin (args)
+  "Request ADMIN for optional TARGET server in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-admin
+                          (unless (string-empty-p args) args))))))
+
+(defun clatter-cmd-info (args)
+  "Request INFO for optional TARGET server in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-info
+                          (unless (string-empty-p args) args))))))
+
+(defun clatter-cmd-version (args)
+  "Request VERSION for optional TARGET server in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-version
+                          (unless (string-empty-p args) args))))))
+
+(defun clatter-cmd-lusers (args)
+  "Request LUSERS for optional MASK and TARGET from ARGS."
+  (let ((conn (clatter--require-conn))
+        (parts (split-string args " " t)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-lusers (car parts) (cadr parts))))))
+
+(defun clatter-cmd-motd (args)
+  "Request MOTD for optional TARGET server in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-motd
+                          (unless (string-empty-p args) args))))))
+
+(defun clatter-cmd-rules (args)
+  "Request RULES for optional TARGET server in ARGS."
+  (let ((conn (clatter--require-conn)))
+    (when conn
+      (clatter--remember-query-origin conn)
+      (clatter-send conn (clatter-irc-rules
+                          (unless (string-empty-p args) args))))))
+
 (defun clatter-cmd-raw (args)
   "Send ARGS to the server as a raw IRC line."
   (let ((conn (clatter--require-conn)))
     (when conn
       (if (> (length args) 0)
-          (clatter-send conn args)
+          (progn
+           (clatter-send conn args)
+           ;; Echo the sent line locally.  /raw bypasses the formatter
+           ;; self-echo path, so without this a successful send is
+           ;; invisible in the chat buffer.  current-buffer here is the
+           ;; originating buffer (unlike the receive-time filter).
+           (clatter-insert-system (current-buffer) (concat ">> " args)))
         (clatter-insert-error (current-buffer) "Usage: /raw IRC-COMMAND")))))
 
 (defun clatter-cmd-query (args)
@@ -424,7 +625,28 @@ With `none', clear all suppressions."
 (clatter-defcommand "topic" #'clatter-cmd-topic)
 (clatter-defcommand "kick" #'clatter-cmd-kick)
 (clatter-defcommand "mode" #'clatter-cmd-mode)
+(clatter-defcommand "op" #'clatter-cmd-op)
+(clatter-defcommand "deop" #'clatter-cmd-deop)
+(clatter-defcommand "voice" #'clatter-cmd-voice)
+(clatter-defcommand "devoice" #'clatter-cmd-devoice)
+(clatter-defcommand "hop" #'clatter-cmd-hop)
+(clatter-defcommand "dehop" #'clatter-cmd-dehop)
+(clatter-defcommand "quiet" #'clatter-cmd-quiet)
+(clatter-defcommand "unquiet" #'clatter-cmd-unquiet)
+(clatter-defcommand "ban" #'clatter-cmd-ban)
+(clatter-defcommand "unban" #'clatter-cmd-unban)
 (clatter-defcommand "whois" #'clatter-cmd-whois)
+(clatter-defcommand "who" #'clatter-cmd-who)
+(clatter-defcommand "whowas" #'clatter-cmd-whowas)
+(clatter-defcommand "ison" #'clatter-cmd-ison)
+(clatter-defcommand "links" #'clatter-cmd-links)
+(clatter-defcommand "stats" #'clatter-cmd-stats)
+(clatter-defcommand "admin" #'clatter-cmd-admin)
+(clatter-defcommand "info" #'clatter-cmd-info)
+(clatter-defcommand "version" #'clatter-cmd-version)
+(clatter-defcommand "lusers" #'clatter-cmd-lusers)
+(clatter-defcommand "motd" #'clatter-cmd-motd)
+(clatter-defcommand "rules" #'clatter-cmd-rules)
 (clatter-defcommand "away" #'clatter-cmd-away)
 (clatter-defcommand "quit" #'clatter-cmd-quit "q")
 (clatter-defcommand "raw" #'clatter-cmd-raw)
@@ -703,6 +925,10 @@ Uses +draft/react tag via TAGMSG."
       (message "No message to react to (select a message using the secondary selection i.e. M-<mouse-1>)"))
      ((null conn)
       (message "Not connected"))
+     ((not (member "message-tags" (clatter-connection-cap-enabled conn)))
+      (message "Server does not support the message-tags capability; reactions unavailable"))
+     ((clatter-connection-tagmsg-rejected conn)
+      (message "Server rejected TAGMSG; reactions unavailable on this network"))
      (t
       (clatter-send conn (clatter-irc-tagmsg target tags))
       ; Clear secondary selection

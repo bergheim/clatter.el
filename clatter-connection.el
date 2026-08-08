@@ -35,6 +35,9 @@
   cap-enabled          ; list of enabled capability strings
   cap-available        ; list of capabilities advertised by the server
   cap-string           ; capability string sent by the server
+  tagmsg-rejected      ; t once the server returned 421 for TAGMSG (stop sending)
+  last-query-buffer    ; buffer that issued the most recent query command, for reply routing
+  pending-whox         ; list of channels with an in-flight internal WHOX (replies are not displayed)
   ;; IRCv3 batch/label tracking
   active-batches       ; hash-table: batch-id -> plist
   deferred-batches     ; completed batches held until CAP negotiation ends
@@ -443,6 +446,9 @@ ARGS are keyword arguments that override `clatter-networks' config:
       (setf (clatter-connection-cap-negotiating conn) nil)
       (setf (clatter-connection-cap-enabled conn) nil)
       (setf (clatter-connection-cap-string conn) nil)
+      (setf (clatter-connection-tagmsg-rejected conn) nil)
+      (setf (clatter-connection-last-query-buffer conn) nil)
+      (setf (clatter-connection-pending-whox conn) nil)
       (setf (clatter-connection-sasl-state conn) nil)
       (setf (clatter-connection-ping-sent-time conn) nil)
       (setf (clatter-connection-away-p conn) nil)
