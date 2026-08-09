@@ -246,6 +246,12 @@ This is the main entry point from the process filter into the handler layer."
       ;; dead; `delete-process' is idempotent when other paths (the
       ;; connect-abort/watchdog/health paths) already deleted it.
       (delete-process proc)
+      ;; The external-TLS subprocess captures gnutls-cli/openssl stderr in
+      ;; a hidden buffer; kill it now that the subprocess is gone so failed
+      ;; connections don't leave one buffer per attempt.  Failure reasons are
+      ;; already preserved in the watchdog log.
+      (when-let* ((tls-buf (get-buffer (format " *clatter-tls-%s*" network-id))))
+        (kill-buffer tls-buf))
       (clatter--cancel-reconnect-stable-timer conn)
       ;; Cancel health timer
       (when (clatter-connection-health-timer conn)

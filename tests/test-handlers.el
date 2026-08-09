@@ -752,7 +752,8 @@ Without this, every failed or retried clatter connection lingers in
 `M-x list-processes' until Emacs is restarted."
   (let* ((conn (clatter-test-make-connection "dead" "testnick"))
          (proc (make-pipe-process :name "clatter-test-dead"
-                                 :buffer nil :noquery t)))
+                                 :buffer nil :noquery t))
+         (tls-buf (get-buffer-create " *clatter-tls-dead*")))
     (setf (clatter-connection-process conn) proc
           (clatter-connection-state conn) :connected
           (clatter-connection-reconnect-enabled conn) nil)
@@ -760,12 +761,16 @@ Without this, every failed or retried clatter connection lingers in
     (unwind-protect
         (progn
           (should (memq proc (process-list)))
+          (should (buffer-live-p tls-buf))
           (clatter--process-sentinel proc "connection broken by remote peer\n")
           (should-not (memq proc (process-list)))
+          (should-not (buffer-live-p tls-buf))
           (should-not (clatter-connection-process conn))
           (should (eq (clatter-connection-state conn) :disconnected)))
       (when (process-live-p proc)
         (delete-process proc))
+      (when (buffer-live-p tls-buf)
+        (kill-buffer tls-buf))
       (clatter-test-cleanup))))
 
 (ert-deftest clatter-test-reconnect-stable-timer-belongs-to-current-process ()
