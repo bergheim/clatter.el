@@ -249,6 +249,17 @@ have channels with very long nicknames."
   :type 'integer
   :group 'clatter)
 
+(defcustom clatter-reconnect-max-attempts 10
+  "Maximum number of consecutive reconnection attempts before giving up.
+After this many failed attempts the connection is left disconnected and
+auto-reconnect is disabled; a persistent failure (unavailable credentials,
+a SASL-required server, a dead host) then stops looping instead of
+retrying forever.  Nil means never give up (the historical behavior).
+Reconnect manually with `clatter-connect' once the underlying problem is fixed."
+  :type '(choice (const :tag "Never give up" nil)
+                 (integer :tag "Max attempts"))
+  :group 'clatter)
+
 (defcustom clatter-ping-interval 30
   "Seconds between sending keepalive pings to the server.
 Matches ERC default.  Lower values keep the connection alive through

@@ -661,6 +661,48 @@
                       'clatter-test-reconnect-timer)))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-reconnect-gives-up-after-max-attempts ()
+  "Once attempts reach `clatter-reconnect-max-attempts', reconnect gives up.
+A persistent, user-actionable failure (unavailable SASL credentials, a
+SASL-required server) must stop looping instead of retrying forever.  The
+attempt count is left as-is and auto-reconnect is disabled."
+  (let ((conn (clatter-test-make-connection "retry" "testnick"))
+        (clatter-reconnect-max-attempts 2)
+        (scheduled 0))
+    (setf (clatter-connection-state conn) :disconnected
+          (clatter-connection-reconnect-attempts conn) 2)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (&rest _)
+                     (cl-incf scheduled)
+                     'clatter-test-reconnect-timer))
+                  ((symbol-function 'clatter--watchdog) (lambda (&rest _))))
+          (clatter--schedule-reconnect conn)
+          (should-not (clatter-connection-reconnect-enabled conn))
+          (should (= scheduled 0))
+          (should (= (clatter-connection-reconnect-attempts conn) 2))
+          (should-not (clatter-connection-reconnect-timer conn)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-reconnect-max-attempts-nil-never-gives-up ()
+  "A nil `clatter-reconnect-max-attempts' preserves the old unlimited behavior."
+  (let ((conn (clatter-test-make-connection "retry" "testnick"))
+        (clatter-reconnect-max-attempts nil)
+        (scheduled 0))
+    (setf (clatter-connection-state conn) :disconnected
+          (clatter-connection-reconnect-attempts conn) 1000)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (&rest _)
+                     (cl-incf scheduled)
+                     'clatter-test-reconnect-timer))
+                  ((symbol-function 'clatter--watchdog) (lambda (&rest _))))
+          (clatter--schedule-reconnect conn)
+          (should (clatter-connection-reconnect-enabled conn))
+          (should (= scheduled 1))
+          (should (= (clatter-connection-reconnect-attempts conn) 1001)))
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-stale-reconnect-callback-cannot-own-newer-timer ()
   "An obsolete reconnect callback cannot clear or run a replacement timer."
   (let ((conn (clatter-test-make-connection "retry" "testnick"))

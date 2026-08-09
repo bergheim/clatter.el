@@ -410,110 +410,130 @@ ARGS are keyword arguments that override `clatter-networks' config:
     (when (and proxy use-tls (eq clatter-tls-method 'external))
       (error "SOCKS proxy requires builtin TLS (set `clatter-tls-method' to \\='builtin)"))
 
-    ;; Create or reuse connection struct
-    (let ((conn (or (clatter-get-connection network-id)
-                    (let ((new-conn (clatter-connection--create
-                                     :network-id network-id
-                                     :config config
-                                     :connect-overrides args
-                                     :state :disconnected
-                                     :nick nick
-                                     :reconnect-enabled t
-                                     :reconnect-attempts 0
-                                     :active-batches (make-hash-table :test 'equal)
-                                     :pending-labels (make-hash-table :test 'equal)
-                                     :label-counter 0)))
-                      (puthash network-id new-conn clatter-connections)
-                      new-conn))))
+    ;; Fail fast when SASL credentials are configured but unavailable.
+    ;; A nil password would otherwise make clatter silently register
+    ;; anonymous (skipping SASL); a SASL-required server then drops the
+    ;; connection, and the reconnect loop retries a failure only the user
+    ;; can fix.  Refuse up front and point at the cause instead.
+    (if (and (memq (plist-get config :sasl) '(plain scram-sha-256))
+             (not (clatter-get-password network-id config)))
+        (progn
+          (clatter--watchdog "CONNECT-REFUSE %s no SASL password" network-id)
+          (message "[clatter] No password found for %s (:sasl %s); not connecting.  Fix auth-source/pass and run M-x clatter-connect."
+                   network-id (plist-get config :sasl))
+          (let ((conn (clatter-get-connection network-id)))
+            (when conn
+              (setf (clatter-connection-reconnect-enabled conn) nil)
+              (clatter--cancel-reconnect-timer conn)
+              (setf (clatter-connection-state conn) :disconnected)
+              (run-hook-with-args 'clatter-system-hook conn
+                                 (format "No SASL password found for %s"
+                                         network-id))))
+          nil)
+      ;; Create or reuse connection struct
+      (let ((conn (or (clatter-get-connection network-id)
+                      (let ((new-conn (clatter-connection--create
+                                       :network-id network-id
+                                       :config config
+                                       :connect-overrides args
+                                       :state :disconnected
+                                       :nick nick
+                                       :reconnect-enabled t
+                                       :reconnect-attempts 0
+                                       :active-batches (make-hash-table :test 'equal)
+                                       :pending-labels (make-hash-table :test 'equal)
+                                       :label-counter 0)))
+                        (puthash network-id new-conn clatter-connections)
+                        new-conn))))
 
-      ;; Detach a superseded process before deleting it so its sentinel cannot
-      ;; schedule a second reconnect for the new attempt.
-      (clatter--cancel-reconnect-timer conn)
-      (clatter--cancel-reconnect-stable-timer conn)
-      (when-let* ((old-process (clatter-connection-process conn)))
-        (setf (clatter-connection-process conn) nil)
-        (delete-process old-process))
+        ;; Detach a superseded process before deleting it so its sentinel cannot
+        ;; schedule a second reconnect for the new attempt.
+        (clatter--cancel-reconnect-timer conn)
+        (clatter--cancel-reconnect-stable-timer conn)
+        (when-let* ((old-process (clatter-connection-process conn)))
+          (setf (clatter-connection-process conn) nil)
+          (delete-process old-process))
 
-      (setf (clatter-connection-state conn) :connecting)
-      ;; Keep the resolved config after the process is gone so reconnects
-      ;; retain temporary `clatter-connect' keyword overrides (notably
-      ;; `:bouncer').
-      (setf (clatter-connection-config conn) config)
-      (setf (clatter-connection-connect-overrides conn) args)
-      (setf (clatter-connection-nick conn) nick)
-      (setf (clatter-connection-desired-nick conn) nick)
-      (setf (clatter-connection-recv-buffer conn) (decode-coding-string "" 'utf-8))
-      (setf (clatter-connection-cap-negotiating conn) nil)
-      (setf (clatter-connection-cap-enabled conn) nil)
-      (setf (clatter-connection-cap-string conn) nil)
-      (setf (clatter-connection-tagmsg-rejected conn) nil)
-      (setf (clatter-connection-last-query-buffer conn) nil)
-      (setf (clatter-connection-pending-whox conn) nil)
-      (setf (clatter-connection-sasl-state conn) nil)
-      (setf (clatter-connection-ping-sent-time conn) nil)
-      (setf (clatter-connection-away-p conn) nil)
-      (clrhash (clatter-connection-active-batches conn))
-      (setf (clatter-connection-deferred-batches conn) nil)
-      (clrhash (clatter-connection-pending-labels conn))
+        (setf (clatter-connection-state conn) :connecting)
+        ;; Keep the resolved config after the process is gone so reconnects
+        ;; retain temporary `clatter-connect' keyword overrides (notably
+        ;; `:bouncer').
+        (setf (clatter-connection-config conn) config)
+        (setf (clatter-connection-connect-overrides conn) args)
+        (setf (clatter-connection-nick conn) nick)
+        (setf (clatter-connection-desired-nick conn) nick)
+        (setf (clatter-connection-recv-buffer conn) (decode-coding-string "" 'utf-8))
+        (setf (clatter-connection-cap-negotiating conn) nil)
+        (setf (clatter-connection-cap-enabled conn) nil)
+        (setf (clatter-connection-cap-string conn) nil)
+        (setf (clatter-connection-tagmsg-rejected conn) nil)
+        (setf (clatter-connection-last-query-buffer conn) nil)
+        (setf (clatter-connection-pending-whox conn) nil)
+        (setf (clatter-connection-sasl-state conn) nil)
+        (setf (clatter-connection-ping-sent-time conn) nil)
+        (setf (clatter-connection-away-p conn) nil)
+        (clrhash (clatter-connection-active-batches conn))
+        (setf (clatter-connection-deferred-batches conn) nil)
+        (clrhash (clatter-connection-pending-labels conn))
 
-      (message "[clatter] Connecting to %s:%d%s..."
-               server port (if use-tls " (TLS)" ""))
-      (clatter--watchdog "CONNECT %s %s:%d tls=%s" network-id server port use-tls)
+        (message "[clatter] Connecting to %s:%d%s..."
+                 server port (if use-tls " (TLS)" ""))
+        (clatter--watchdog "CONNECT %s %s:%d tls=%s" network-id server port use-tls)
 
-      (condition-case err
-          (if (and use-tls (eq clatter-tls-method 'external))
-              ;; External TLS subprocess path: TLS runs in a separate OS
-              ;; process so a dead socket cannot block Emacs's event loop.
-              (clatter--connect-external conn config network-id server port)
-          (let* (;; Always connect plain+nowait first - TLS handshake
-                 ;; happens async in the sentinel to avoid blocking Emacs
-                 (proc (make-network-process
-                        :name (format "clatter-%s" network-id)
-                        :host (if proxy (plist-get proxy :host) server)
-                        :service (if proxy (plist-get proxy :port) port)
-                        :nowait t
-                        :coding (if proxy '(binary . binary) '(utf-8 . utf-8))
-                        :filter #'clatter--process-filter
-                        :sentinel
-                        (lambda (p e)
-                          (clatter--watchdog "SENTINEL %s event=%s status=%s"
-                                             network-id (string-trim e)
-                                             (process-status p))
-                          (cond
-                           ;; TCP connected - run SOCKS handshake or go direct
-                           ((string-match-p "open" e)
-                            (if proxy
-                                (clatter-socks-begin
-                                 p server port proxy
-                                 (lambda ()
-                                   (set-process-coding-system p 'utf-8 'utf-8)
-                                   (set-process-filter p #'clatter--process-filter)
-                                   (clatter--watchdog "SOCKS-OK %s" network-id)
-                                   (clatter--after-tcp-open conn p config server use-tls))
-                                 (lambda (reason)
-                                   (clatter--watchdog "SOCKS-FAIL %s %s" network-id reason)
-                                   (clatter--connect-abort
-                                    p (format "SOCKS5: %s" reason))))
-                              (clatter--after-tcp-open conn p config server use-tls)))
-                           ;; Connection failed or closed
-                           (t
-                            (clatter--process-sentinel p e)))))))
-            (setf (clatter-connection-process conn) proc)
-            (process-put proc :clatter-network-id network-id)
-            ;; Watchdog: kill process if still connecting after 15 seconds
-            (let ((watchdog-proc proc))
-              (run-at-time 15 nil
-                           (lambda ()
-                             (when (and (process-live-p watchdog-proc)
-                                        (eq (clatter-connection-state conn) :connecting))
-                               (clatter--watchdog "WATCHDOG-KILL %s (stuck connecting)" network-id)
-                               (delete-process watchdog-proc)))))
-            conn))
-        (error
-         (clatter--watchdog "CONNECT-FAIL %s %s" network-id (error-message-string err))
-         (setf (clatter-connection-state conn) :disconnected)
-         (message "[clatter] Connection failed: %s" (error-message-string err))
-         nil)))))
+        (condition-case err
+            (if (and use-tls (eq clatter-tls-method 'external))
+                ;; External TLS subprocess path: TLS runs in a separate OS
+                ;; process so a dead socket cannot block Emacs's event loop.
+                (clatter--connect-external conn config network-id server port)
+            (let* (;; Always connect plain+nowait first - TLS handshake
+                   ;; happens async in the sentinel to avoid blocking Emacs
+                   (proc (make-network-process
+                          :name (format "clatter-%s" network-id)
+                          :host (if proxy (plist-get proxy :host) server)
+                          :service (if proxy (plist-get proxy :port) port)
+                          :nowait t
+                          :coding (if proxy '(binary . binary) '(utf-8 . utf-8))
+                          :filter #'clatter--process-filter
+                          :sentinel
+                          (lambda (p e)
+                            (clatter--watchdog "SENTINEL %s event=%s status=%s"
+                                               network-id (string-trim e)
+                                               (process-status p))
+                            (cond
+                             ;; TCP connected - run SOCKS handshake or go direct
+                             ((string-match-p "open" e)
+                              (if proxy
+                                  (clatter-socks-begin
+                                   p server port proxy
+                                   (lambda ()
+                                     (set-process-coding-system p 'utf-8 'utf-8)
+                                     (set-process-filter p #'clatter--process-filter)
+                                     (clatter--watchdog "SOCKS-OK %s" network-id)
+                                     (clatter--after-tcp-open conn p config server use-tls))
+                                   (lambda (reason)
+                                     (clatter--watchdog "SOCKS-FAIL %s %s" network-id reason)
+                                     (clatter--connect-abort
+                                      p (format "SOCKS5: %s" reason))))
+                                (clatter--after-tcp-open conn p config server use-tls)))
+                             ;; Connection failed or closed
+                             (t
+                              (clatter--process-sentinel p e)))))))
+              (setf (clatter-connection-process conn) proc)
+              (process-put proc :clatter-network-id network-id)
+              ;; Watchdog: kill process if still connecting after 15 seconds
+              (let ((watchdog-proc proc))
+                (run-at-time 15 nil
+                             (lambda ()
+                               (when (and (process-live-p watchdog-proc)
+                                          (eq (clatter-connection-state conn) :connecting))
+                                 (clatter--watchdog "WATCHDOG-KILL %s (stuck connecting)" network-id)
+                                 (delete-process watchdog-proc)))))
+              conn))
+          (error
+           (clatter--watchdog "CONNECT-FAIL %s %s" network-id (error-message-string err))
+           (setf (clatter-connection-state conn) :disconnected)
+           (message "[clatter] Connection failed: %s" (error-message-string err))
+           nil))))))
 
 ;; --- Registration ---
 
@@ -607,35 +627,56 @@ delay is raised to at least `clatter-regain-kill-backoff' seconds to
 avoid an immediate re-collision and another kill."
   (unless (or (eq (clatter-connection-state conn) :connecting)
               (clatter-connection-reconnect-timer conn))
-    (let* ((attempts (clatter-connection-reconnect-attempts conn))
-           (delay (min (* clatter-reconnect-initial-delay (expt 2 attempts))
-                       clatter-reconnect-max-delay))
-           (kill-time (clatter-connection-regain-kill-time conn))
-           (recent-regain-kill (and kill-time
-                                    (< (- (float-time) kill-time) 30)))
-           (delay (if recent-regain-kill
-                      (max delay clatter-regain-kill-backoff)
-                    delay))
-           (network-id (clatter-connection-network-id conn))
-           (overrides (clatter-connection-connect-overrides conn)))
-      (when recent-regain-kill
-        (clatter--watchdog "RECONNECT-BACKOFF %s regain-kill-count=%d delay=%ds"
-                           network-id
-                           (or (clatter-connection-regain-kill-count conn) 0)
-                           delay))
-      (message "[clatter] Reconnecting to %s in %ds (attempt %d)..."
-               network-id delay (1+ attempts))
-      (run-hook-with-args 'clatter-reconnect-hook network-id delay (1+ attempts))
-      (setf (clatter-connection-reconnect-attempts conn) (1+ attempts))
-      (let (timer)
-        (setq timer
-              (run-at-time
-               delay nil
-               (lambda ()
-                 (when (eq timer (clatter-connection-reconnect-timer conn))
-                   (setf (clatter-connection-reconnect-timer conn) nil)
-                   (apply #'clatter-connect network-id overrides)))))
-        (setf (clatter-connection-reconnect-timer conn) timer)))))
+    (let* ((network-id (clatter-connection-network-id conn))
+           (attempts (clatter-connection-reconnect-attempts conn)))
+      (if (and clatter-reconnect-max-attempts
+               (>= attempts clatter-reconnect-max-attempts))
+          ;; A persistent, user-actionable failure (unavailable credentials,
+          ;; SASL-required server) will never succeed by retrying.  Stop the
+          ;; loop and tell the user how to recover.
+          (progn
+            (setf (clatter-connection-reconnect-enabled conn) nil)
+            (clatter--watchdog "RECONNECT-GIVEUP %s attempts=%d" network-id attempts)
+            (message "[clatter] Giving up reconnecting to %s after %d attempts; run M-x clatter-connect once the problem is fixed"
+                     network-id attempts)
+            (run-hook-with-args 'clatter-system-hook conn
+                               (format "Reconnect attempts exhausted for %s"
+                                       network-id)))
+        (clatter--schedule-reconnect--schedule conn attempts)))))
+
+(defun clatter--schedule-reconnect--schedule (conn attempts)
+  "Schedule a reconnection attempt for CONN.
+ATTEMPTS is the pre-increment reconnect attempt count.  Applies exponential
+backoff with the regain-kill backoff override; see `clatter--schedule-reconnect'
+for the give-up cap."
+  (let* ((delay (min (* clatter-reconnect-initial-delay (expt 2 attempts))
+                     clatter-reconnect-max-delay))
+         (kill-time (clatter-connection-regain-kill-time conn))
+         (recent-regain-kill (and kill-time
+                                  (< (- (float-time) kill-time) 30)))
+         (delay (if recent-regain-kill
+                    (max delay clatter-regain-kill-backoff)
+                  delay))
+         (network-id (clatter-connection-network-id conn))
+         (overrides (clatter-connection-connect-overrides conn)))
+    (when recent-regain-kill
+      (clatter--watchdog "RECONNECT-BACKOFF %s regain-kill-count=%d delay=%ds"
+                         network-id
+                         (or (clatter-connection-regain-kill-count conn) 0)
+                         delay))
+    (message "[clatter] Reconnecting to %s in %ds (attempt %d)..."
+             network-id delay (1+ attempts))
+    (run-hook-with-args 'clatter-reconnect-hook network-id delay (1+ attempts))
+    (setf (clatter-connection-reconnect-attempts conn) (1+ attempts))
+    (let (timer)
+      (setq timer
+            (run-at-time
+             delay nil
+             (lambda ()
+               (when (eq timer (clatter-connection-reconnect-timer conn))
+                 (setf (clatter-connection-reconnect-timer conn) nil)
+                 (apply #'clatter-connect network-id overrides)))))
+      (setf (clatter-connection-reconnect-timer conn) timer))))
 
 ;; --- Health Monitoring ---
 

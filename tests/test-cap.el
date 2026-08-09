@@ -116,5 +116,79 @@
       (delete-process proc)
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-connect-refuses-without-sasl-password ()
+  "A :sasl plain connection with no available password refuses, not loops.
+auth-source returning nothing must not let clatter silently register
+anonymous and reconnect forever.  No process is spawned and no connection
+struct is registered."
+  (let ((clatter-networks
+         '(("libera"
+            :server "irc.libera.chat"
+            :port 6697
+            :nick "testnick"
+            :sasl plain)))
+        (clatter-default-port 6697)
+        (spawned 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'auth-source-search) (lambda (&rest _) nil))
+                  ((symbol-function 'clatter--watchdog) (lambda (&rest _)))
+                  ((symbol-function 'make-network-process)
+                   (lambda (&rest _)
+                     (cl-incf spawned)
+                     (error "make-network-process should not be called")))
+                  ((symbol-function 'clatter--connect-external)
+                   (lambda (&rest _)
+                     (cl-incf spawned)
+                     (error "clatter--connect-external should not be called"))))
+          (should-not (clatter-connect "libera"))
+          (should (= spawned 0))
+          (should-not (clatter-get-connection "libera")))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-connect-refuse-disables-existing-reconnect ()
+  "Refusing on a reconnect (existing conn) disables its auto-reconnect.
+This is the loop that the user reported: the password later becomes
+unavailable, the connection drops, and reconnect would otherwise keep
+retrying a failure only the user can fix."
+  (let ((clatter-networks
+         '(("libera"
+            :server "irc.libera.chat"
+            :port 6697
+            :nick "testnick"
+            :sasl plain)))
+        (clatter-default-port 6697))
+    (unwind-protect
+        (cl-letf (((symbol-function 'auth-source-search) (lambda (&rest _) nil))
+                  ((symbol-function 'clatter--watchdog) (lambda (&rest _))))
+          (let ((conn (clatter-test-make-connection "libera" "testnick")))
+            (setf (clatter-connection-reconnect-enabled conn) t)
+            (should-not (clatter-connect "libera"))
+            (should (clatter-get-connection "libera")) ; struct still exists
+            (should-not (clatter-connection-reconnect-enabled conn))
+            (should (eq (clatter-connection-state conn) :disconnected))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-connect-with-explicit-sasl-password-spawns ()
+  "An explicit :password lets a :sasl plain connection proceed normally."
+  (let ((clatter-networks
+         '(("libera"
+            :server "irc.libera.chat"
+            :port 6697
+            :nick "testnick"
+            :password "secret"
+            :sasl plain)))
+        (clatter-default-port 6697)
+        (spawned 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'clatter--watchdog) (lambda (&rest _)))
+                  ((symbol-function 'run-at-time) (lambda (&rest _) 'fake-timer))
+                  ((symbol-function 'make-network-process)
+                   (lambda (&rest _)
+                     (cl-incf spawned)
+                     (make-pipe-process :name "clatter-fake" :buffer nil))))
+          (should (clatter-connect "libera"))
+          (should (= spawned 1)))
+      (clatter-test-cleanup))))
+
 (provide 'test-cap)
 ;;; test-cap.el ends here
