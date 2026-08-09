@@ -410,31 +410,197 @@ Priority: mentions > DMs > highest unread count."
           (clatter-clear-activity buf))
       (message "No clatter activity"))))
 
+(defun clatter--activity-entries ()
+  "Return `tabulated-list-entries' for the `*clatter-activity*' buffer.
+Each entry id is the clatter buffer object itself, so the commands
+below resolve the target buffer at point without parsing the displayed
+name."
+  (let ((infos (clatter-track--collect))
+        entries)
+    (dolist (info infos)
+      (let* ((buf (plist-get info :buffer))
+             (name (or (plist-get info :name) ""))
+             (unread (plist-get info :unread))
+             (mention (plist-get info :mention))
+             (dm (plist-get info :dm))
+             (muted (plist-get info :muted))
+             (type (clatter-track--entry-type info))
+             (face (clatter-track--face type muted))
+             (status (cond
+                      ((and mention muted) "mention (muted)")
+                      (mention "mention")
+                      ((and dm muted) "DM (muted)")
+                      (dm "DM")
+                      (muted "muted")
+                      (t ""))))
+        (push (list buf
+                    (vector (cons name
+                                  (list 'face face
+                                        'mouse-face 'highlight
+                                        'help-echo
+                                        (format "%s - %d unread%s"
+                                                name unread
+                                                (if mention " (mentioned)" ""))
+                                        'action
+                                        #'clatter-activity--button-action))
+                            (number-to-string unread)
+                            status))
+              entries)))
+    (nreverse entries)))
+
+(defun clatter-activity--button-action (_button)
+  "Jump to the clatter buffer for the activity entry button at point.
+Button activation target for the `Buffer' column of `*clatter-activity*'."
+  (clatter-activity-jump))
+
+(defun clatter-activity-jump ()
+  "Switch to the clatter buffer for the activity entry at point.
+Like `clatter-track-switch', selects the buffer and clears its activity."
+  (interactive)
+  (let ((buf (tabulated-list-get-id)))
+    (if (buffer-live-p buf)
+        (progn
+          (switch-to-buffer buf)
+          (clatter-clear-activity buf))
+      (message "No clatter buffer at point"))))
+
+(defun clatter-activity-jump-other-window ()
+  "Switch to the clatter buffer at point in another window."
+  (interactive)
+  (let ((buf (tabulated-list-get-id)))
+    (if (buffer-live-p buf)
+        (progn
+          (switch-to-buffer-other-window buf)
+          (clatter-clear-activity buf))
+      (message "No clatter buffer at point"))))
+
+(defun clatter-activity-jump-quit ()
+  "Jump to the clatter buffer at point and bury the activity list."
+  (interactive)
+  (let ((buf (tabulated-list-get-id)))
+    (if (buffer-live-p buf)
+        (progn
+          (quit-window)
+          (switch-to-buffer buf)
+          (clatter-clear-activity buf))
+      (message "No clatter buffer at point"))))
+
+(defun clatter-activity-clear ()
+  "Clear activity for the clatter buffer at point and refresh the list."
+  (interactive)
+  (let ((buf (tabulated-list-get-id)))
+    (if (buffer-live-p buf)
+        (progn
+          (clatter-clear-activity buf)
+          (tabulated-list-print t))
+      (message "No clatter buffer at point"))))
+
+(defun clatter-activity-clear-all ()
+  "Clear activity for every clatter buffer and refresh the list."
+  (interactive)
+  (clatter-track-clear-all)
+  (tabulated-list-print t))
+
+(defun clatter-activity--target-at-point ()
+  "Return the `clatter--target' of the clatter buffer at point, or nil."
+  (let ((buf (tabulated-list-get-id)))
+    (and (buffer-live-p buf)
+         (with-current-buffer buf
+           (and (derived-mode-p 'clatter-mode) clatter--target)))))
+
+(defun clatter-activity-mute ()
+  "Mute the target of the clatter buffer at point and refresh the list."
+  (interactive)
+  (let ((target (clatter-activity--target-at-point)))
+    (if target
+        (progn
+          (unless (member target clatter-track-muted-channels)
+            (push target clatter-track-muted-channels))
+          (clatter-track--update)
+          (tabulated-list-print t)
+          (message "Muted %s" target))
+      (message "No clatter buffer at point"))))
+
+(defun clatter-activity-unmute ()
+  "Unmute the target of the clatter buffer at point and refresh the list."
+  (interactive)
+  (let ((target (clatter-activity--target-at-point)))
+    (if target
+        (progn
+          (setq clatter-track-muted-channels
+                (delete target clatter-track-muted-channels))
+          (clatter-track--update)
+          (tabulated-list-print t)
+          (message "Unmuted %s" target))
+      (message "No clatter buffer at point"))))
+
+(defun clatter-activity-jump-mouse (event)
+  "Jump to the clatter buffer for the activity entry clicked at EVENT."
+  (interactive "e")
+  (let* ((pos (event-start event))
+         (win (posn-window pos)))
+    (when (window-live-p win)
+      (with-current-buffer (window-buffer win)
+        (goto-char (posn-point pos))
+        (clatter-activity-jump)))))
+
+(defvar clatter-activity-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "RET") #'clatter-activity-jump)
+    (define-key map (kbd "o")   #'clatter-activity-jump-other-window)
+    (define-key map (kbd "a")   #'clatter-activity-jump-quit)
+    (define-key map (kbd "c")   #'clatter-activity-clear)
+    (define-key map (kbd "C")   #'clatter-activity-clear-all)
+    (define-key map (kbd "m")   #'clatter-activity-mute)
+    (define-key map (kbd "u")   #'clatter-activity-unmute)
+    (define-key map [mouse-2]   #'clatter-activity-jump-mouse)
+    map)
+  "Keymap for `clatter-activity-mode'.
+Inherits `tabulated-list-mode', which supplies `n'/`p' (line motion),
+`g' (revert/refresh), `S' (sort by column), `TAB'/`S-TAB' (next/previous
+button = entry), `<'/`>' (first/last), `SPC'/`DEL' (scroll), `h'/`?'
+(help) and `q' (quit).  On top of that:
+
+  \\[clatter-activity-jump]        jump to the buffer at point
+  \\[clatter-activity-jump-other-window]  open it in another window
+  \\[clatter-activity-jump-quit]   jump to it and bury the list
+  \\[clatter-activity-clear]      clear its activity
+  \\[clatter-activity-clear-all]  clear activity for every buffer
+  \\[clatter-activity-mute]       mute its target
+  \\[clatter-activity-unmute]     unmute its target
+  \\[clatter-activity-jump-mouse] (mouse-2) jump to the clicked entry")
+
+(define-derived-mode clatter-activity-mode tabulated-list-mode "Clatter Activity"
+  "Major mode for the `*clatter-activity*' buffer.
+\\{clatter-activity-mode-map}
+Lists clatter buffers that currently have unread activity, pre-sorted by
+priority (mentions > DMs > unread count).  The buffer reverts with `g'
+(\\[revert-buffer]); each revert re-runs `clatter--activity-entries' so the
+list always reflects current unread state.  The `Buffer' cell of each row
+is also a button: `RET' (or mouse-2) on it jumps to that clatter buffer."
+  (setq tabulated-list-format
+        ;; NAME WIDTH SORT . PROPS.  Buffer sorts by name; Unread and Status
+        ;; keep the natural priority order (nil = not a sort column).
+        [("Buffer" 32 t)
+         ("Unread" 8 nil :right-align t)
+         ("Status" 0 nil)])
+  (setq tabulated-list-padding 2)
+  (setq tabulated-list-entries #'clatter--activity-entries)
+  (tabulated-list-init-header))
+
 (defun clatter-track-list ()
-  "Display all clatter buffer activity in a temporary buffer."
+  "Display all clatter buffer activity in the `*clatter-activity*' buffer.
+Renders the activity summary as a tabulated list; revert it with `g'
+\(\\[revert-buffer]) to refresh."
   (interactive)
   (let ((infos (clatter-track--collect)))
-    (if infos
-        (with-current-buffer (get-buffer-create "*clatter-activity*")
-          (let ((inhibit-read-only t))
-            (erase-buffer)
-            (insert "CLatter Activity\n")
-            (insert (make-string 40 ?-) "\n\n")
-            (dolist (info infos)
-              (let ((name (plist-get info :name))
-                    (unread (plist-get info :unread))
-                    (mention (plist-get info :mention))
-                    (dm (plist-get info :dm))
-                    (muted (plist-get info :muted)))
-                (insert (format "  %-25s %3d unread%s%s%s\n"
-                                name unread
-                                (if mention "  @mentioned" "")
-                                (if dm "  DM" "")
-                                (if muted "  (muted)" "")))))
-            (goto-char (point-min))
-            (special-mode))
-          (display-buffer (current-buffer)))
-      (message "No clatter activity"))))
+    (if (not infos)
+        (message "No clatter activity")
+      (with-current-buffer (get-buffer-create "*clatter-activity*")
+        (clatter-activity-mode)
+        (tabulated-list-print t)
+        (goto-char (point-min))
+        (display-buffer (current-buffer))))))
 
 (defun clatter-track-mute (channel)
   "Add CHANNEL to the muted list."

@@ -105,6 +105,113 @@
                                  (string< (buffer-name a) (buffer-name b)))))))
       (clatter-test-cleanup))))
 
+(defmacro clatter-activity-test--cleanup (&rest body)
+  "Run BODY then clean up clatter buffers and the activity list buffer."
+  (declare (indent 0))
+  `(unwind-protect
+       (progn ,@body)
+     (when-let* ((b (get-buffer "*clatter-activity*"))) (kill-buffer b))
+     (clatter-test-cleanup)))
+
+(ert-deftest clatter-activity-list-renders-tabulated-entries ()
+  "`*clatter-activity*' is a tabulated list whose entry id is the clatter buffer."
+  (let ((clatter-track-shorten-names t)
+        (clatter-track-exclude-targets nil)
+        (clatter-track-muted-channels '("#muted")))
+    (clatter-activity-test--cleanup
+      (let ((alpha (clatter-get-or-create-buffer "act" "#alpha" 'channel))
+            (beta (clatter-get-or-create-buffer "act" "#beta" 'channel))
+            (bob (clatter-get-or-create-buffer "act" "bob" 'query))
+            (muted (clatter-get-or-create-buffer "act" "#muted" 'channel)))
+        (with-current-buffer alpha (setq clatter--unread-count 3))
+        (with-current-buffer beta
+          (setq clatter--unread-count 5 clatter--has-mention t))
+        (with-current-buffer bob (setq clatter--unread-count 2))
+        (with-current-buffer muted (setq clatter--unread-count 1))
+        (clatter-track-list)
+        (with-current-buffer (get-buffer "*clatter-activity*")
+          (should (eq major-mode 'clatter-activity-mode))
+          (should (eq revert-buffer-function #'tabulated-list-revert))
+          (should (eq tabulated-list-entries #'clatter--activity-entries))
+          ;; Mentions sort first, so the top entry resolves to #beta.
+          (goto-char (point-min))
+          (should (eq (tabulated-list-get-id) beta))
+          ;; Status column surfaces mention, DM, and muted flags.
+          (let ((contents (buffer-string)))
+            (should (string-match-p "mention" contents))
+            (should (string-match-p "DM" contents))
+            (should (string-match-p "muted" contents)))
+          ;; Revert drops buffers whose activity has been cleared.
+          (with-current-buffer alpha (setq clatter--unread-count 0))
+          (funcall revert-buffer-function nil t)
+          (should-not (string-match-p "#alpha" (buffer-string)))
+          (should (string-match-p "#beta" (buffer-string))))))))
+
+(ert-deftest clatter-activity-jump-switches-to-buffer-and-clears ()
+  "`clatter-activity-jump' selects the entry's clatter buffer and clears it."
+  (let ((clatter-track-shorten-names t)
+        (clatter-track-exclude-targets nil)
+        recorded)
+    (clatter-activity-test--cleanup
+      (cl-letf (((symbol-function 'clatter-read-state-record-buffer)
+                 (lambda (buffer) (push buffer recorded))))
+        (let ((chan (clatter-get-or-create-buffer "jump" "#chan" 'channel)))
+          (with-current-buffer chan (setq clatter--unread-count 4))
+          (clatter-track-list)
+          (with-current-buffer (get-buffer "*clatter-activity*")
+            (goto-char (point-min))
+            (should (eq (tabulated-list-get-id) chan))
+            (clatter-activity-jump))
+          ;; `clatter-activity-jump' switches the selected window to chan and
+          ;; clears its activity (`current-buffer' is restored by the
+          ;; `with-current-buffer' above, so check the selected window).
+          (should (eq (window-buffer (selected-window)) chan))
+          (with-current-buffer chan (should (zerop clatter--unread-count)))
+          (should (memq chan recorded)))))))
+
+(ert-deftest clatter-activity-clear-clears-entry-at-point ()
+  "`clatter-activity-clear' clears the entry at point and refreshes the list."
+  (let ((clatter-track-shorten-names t)
+        (clatter-track-exclude-targets nil)
+        recorded)
+    (clatter-activity-test--cleanup
+      (cl-letf (((symbol-function 'clatter-read-state-record-buffer)
+                 (lambda (buffer) (push buffer recorded))))
+        (let ((first (clatter-get-or-create-buffer "clear" "#first" 'channel))
+              (second (clatter-get-or-create-buffer "clear" "#second" 'channel)))
+          ;; Give #first a higher unread count so it sorts above #second,
+          ;; making it the entry at point after `goto-char (point-min)'.
+          (with-current-buffer first (setq clatter--unread-count 5))
+          (with-current-buffer second (setq clatter--unread-count 1))
+          (clatter-track-list)
+          (with-current-buffer (get-buffer "*clatter-activity*")
+            (goto-char (point-min))
+            (should (eq (tabulated-list-get-id) first))
+            (clatter-activity-clear)
+            (should (with-current-buffer first (zerop clatter--unread-count)))
+            (should (memq first recorded))
+            (should-not (string-match-p "#first" (buffer-string)))
+            (should (string-match-p "#second" (buffer-string)))))))))
+
+(ert-deftest clatter-activity-mute-and-unmute-toggle-target-at-point ()
+  "`clatter-activity-mute' and `clatter-activity-unmute' toggle the point target."
+  (let ((clatter-track-shorten-names t)
+        (clatter-track-exclude-targets nil)
+        (clatter-track-muted-channels nil))
+    (clatter-activity-test--cleanup
+      (let ((chan (clatter-get-or-create-buffer "mute" "#chan" 'channel)))
+        (with-current-buffer chan (setq clatter--unread-count 2))
+        (clatter-track-list)
+        (with-current-buffer (get-buffer "*clatter-activity*")
+          (goto-char (point-min))
+          (should (eq (tabulated-list-get-id) chan))
+          (clatter-activity-mute)
+          (should (member "#chan" clatter-track-muted-channels))
+          (should (string-match-p "muted" (buffer-string)))
+          (clatter-activity-unmute)
+          (should-not (member "#chan" clatter-track-muted-channels))
+          (should-not (string-match-p "muted" (buffer-string))))))))
+
 (provide 'test-track)
 
 ;;; test-track.el ends here
