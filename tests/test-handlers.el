@@ -746,6 +746,28 @@ attempt count is left as-is and auto-reconnect is disabled."
           (should (eq (clatter-connection-state conn) :connected)))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-sentinel-deletes-dead-process ()
+  "The sentinel removes the dead process from `process-list'.
+Without this, every failed or retried clatter connection lingers in
+`M-x list-processes' until Emacs is restarted."
+  (let* ((conn (clatter-test-make-connection "dead" "testnick"))
+         (proc (make-pipe-process :name "clatter-test-dead"
+                                 :buffer nil :noquery t)))
+    (setf (clatter-connection-process conn) proc
+          (clatter-connection-state conn) :connected
+          (clatter-connection-reconnect-enabled conn) nil)
+    (process-put proc :clatter-network-id "dead")
+    (unwind-protect
+        (progn
+          (should (memq proc (process-list)))
+          (clatter--process-sentinel proc "connection broken by remote peer\n")
+          (should-not (memq proc (process-list)))
+          (should-not (clatter-connection-process conn))
+          (should (eq (clatter-connection-state conn) :disconnected)))
+      (when (process-live-p proc)
+        (delete-process proc))
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-reconnect-stable-timer-belongs-to-current-process ()
   "Only the current process's stable timer can reset reconnect backoff."
   (let* ((conn (clatter-test-make-connection "retry" "testnick"))

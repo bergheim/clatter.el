@@ -240,6 +240,12 @@ This is the main entry point from the process filter into the handler layer."
       (message "[clatter] Disconnected from %s: %s" network-id (string-trim event))
       (setf (clatter-connection-state conn) :disconnected)
       (setf (clatter-connection-process conn) nil)
+      ;; Release the dead process so it does not linger in
+      ;; `process-list' (M-x list-processes) after every disconnect.
+      ;; This sentinel only runs on terminal events, so PROC is already
+      ;; dead; `delete-process' is idempotent when other paths (the
+      ;; connect-abort/watchdog/health paths) already deleted it.
+      (delete-process proc)
       (clatter--cancel-reconnect-stable-timer conn)
       ;; Cancel health timer
       (when (clatter-connection-health-timer conn)
