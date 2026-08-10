@@ -596,6 +596,19 @@ Return the trimmed character."
            (run-hook-with-args 'clatter-react-hook
                                conn parsed-prefix target react-emoji react-msgid))))
 
+      ;; --- CHATHISTORY (IRCv3 - TARGETS response entries) ---
+      ("CHATHISTORY"
+       (let* ((parsed-tags (clatter-parse-tags tags))
+              (batch-id (clatter-get-parsed-tag parsed-tags "batch"))
+              (server-time (clatter-get-parsed-server-time parsed-tags)))
+         (when batch-id
+           (let ((batch (gethash batch-id (clatter-connection-active-batches conn))))
+             (when batch
+               (push (list :type 'chathistory-targets
+                           :target (nth 0 params)
+                           :time server-time)
+                     (plist-get batch :messages)))))))
+
       ;; --- MARKREAD (IRCv3 read-marker) ---
       ("MARKREAD"
        (when (fboundp 'clatter-read-marker--handle)
