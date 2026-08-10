@@ -6,6 +6,7 @@
 (require 'clatter-ui)
 (require 'clatter-commands)
 (require 'clatter-nicklist)
+(require 'clatter-pals)
 
 (ert-deftest clatter-navigation-orders-messages-and-interactive-items ()
   "Navigation visits a message, its link, then the following message."
@@ -417,6 +418,41 @@
               (should-not clatter--pending-self-echoes)
               (should-not (text-property-any
                            (point-min) (point-max) 'clatter-self-echo-nonce nonce)))))
+      (clatter-test-cleanup))))
+
+;; --- Playback fool visibility ---
+
+(defun clatter-test--property-at-text (text property)
+  "Return PROPERTY at the first occurrence of TEXT in the current buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (when (search-forward text nil t)
+      (get-text-property (1- (point)) property))))
+
+(ert-deftest clatter-test-playback-fools-are-toggleable ()
+  "Fool messages in history playback get the fool invisibility category.
+Live buffer messages tag fools with the `clatter-fool' invisible category
+so /fools can toggle them; playback batches must do the same rather than
+always showing fool messages."
+  (let ((clatter-fools '("noisemaker"))
+        (clatter-timestamp-side nil))
+    (unwind-protect
+        (clatter-test-with-mock-send
+          (let* ((conn (clatter-test-make-connection "playback-fools"))
+                 (buf (clatter-get-or-create-buffer "playback-fools" "#test")))
+            (clatter-ui-setup-buffer-if-needed buf)
+            (clatter-ui--on-batch-complete
+             conn "chathistory" "#test"
+             (list (list :type 'privmsg :sender "noisemaker"
+                         :text "fool-playback-line" :time nil)
+                   (list :type 'privmsg :sender "friend"
+                         :text "pal-playback-line" :time nil)))
+            (with-current-buffer buf
+              (should (eq (clatter-test--property-at-text
+                           "fool-playback-line" 'invisible)
+                          'clatter-fool))
+              (should-not (clatter-test--property-at-text
+                           "pal-playback-line" 'invisible)))))
       (clatter-test-cleanup))))
 
 ;; --- Timestamp margins ---

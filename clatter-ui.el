@@ -2271,13 +2271,20 @@ Renders a visual separator before and after history playback."
         ;; otherwise scan every old message and stampede curl subprocesses.
         (let ((clatter--suppress-image-scan t))
           (dolist (msg messages)
-            (let ((msg-type (plist-get msg :type))
-                  (sender (plist-get msg :sender))
-                  (text (plist-get msg :text))
-                  (time (plist-get msg :time)))
+            (let* ((msg-type (plist-get msg :type))
+                   (sender (plist-get msg :sender))
+                   (text (plist-get msg :text))
+                   (time (plist-get msg :time))
+                   ;; Batch messages carry only the nick, not a full
+                   ;; nick!user@host prefix, so wrap it for
+                   ;; `clatter-sender-invisibility'.  This makes fools
+                   ;; (and ignored senders) in playback toggleable just
+                   ;; like live buffer messages.
+                   (invisible (clatter-sender-invisibility
+                               (list sender nil nil) network)))
               (pcase msg-type
-                ('action (clatter-insert-action buf sender text conn time))
-                (_ (clatter-insert-privmsg buf sender text conn time))))))
+                ('action (clatter-insert-action buf sender text conn time invisible))
+                (_ (clatter-insert-privmsg buf sender text conn time invisible))))))
         ;; Insert end separator
         (clatter--insert-message
          buf
