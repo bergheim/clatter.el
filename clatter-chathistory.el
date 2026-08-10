@@ -18,6 +18,7 @@
 (require 'clatter-config)
 (require 'clatter-connection)
 (require 'clatter-model)
+(require 'clatter-protocol)
 
 ;; --- Configuration ---
 
@@ -104,6 +105,53 @@ Used on reconnect to fill in gaps."
       (clatter-send conn
                     (format "CHATHISTORY AFTER %s timestamp=%s %d"
                             target ts n)))))
+
+;; --- TARGETS (DM discovery) ---
+
+(defun clatter-chathistory-fetch-targets (conn &optional limit)
+  "Request CHATHISTORY TARGETS on CONN to discover DM targets with history.
+LIMIT defaults to `clatter-chathistory-limit'.  The server responds with a
+batch of type `chathistory-targets' listing channels and DM partners that
+have history, each with the timestamp of their latest message."
+  (when (clatter-chathistory--available-p conn)
+    (let ((n (or limit clatter-chathistory-limit)))
+      (clatter-send conn
+                    (format "CHATHISTORY TARGETS * * %d" n)))))
+
+(defun clatter-chathistory--on-welcome (conn _nick)
+  "On welcome (001), request CHATHISTORY TARGETS to discover missed DMs.
+This is essential when connecting through a bouncer: channels get their
+history fetched on JOIN, but DM buffers are only created on demand.
+Without TARGETS, DMs received while offline are never fetched."
+  (when (and clatter-chathistory-enabled
+             (clatter-chathistory--available-p conn))
+    (clatter-chathistory-fetch-targets conn)))
+
+(defun clatter-chathistory--on-targets-batch (conn _batch-type _target messages)
+  "Process a completed chathistory-targets batch.
+MESSAGES is a list of plists with :target and :time keys.  For each
+target that is a DM (not a channel), fetch latest history if we don't
+already have a buffer for it, or fetch since the last known timestamp
+if we do."
+  (when (and clatter-chathistory-enabled
+             (clatter-chathistory--available-p conn))
+    (let ((network (clatter-connection-network-id conn))
+          (my-nick (clatter-connection-nick conn)))
+      (dolist (entry messages)
+        (let ((target (plist-get entry :target)))
+          (when (and target
+                     (not (clatter-channel-name-p target))
+                     (not (string-equal target my-nick)))
+            (let ((buf (clatter-get-buffer network target)))
+              (if (and buf
+                       (buffer-local-value 'clatter-chathistory--last-timestamp buf))
+                  ;; Existing buffer: fetch since last known message
+                  (when clatter-chathistory-on-reconnect
+                    (clatter-chathistory-fetch-since
+                     conn target
+                     (buffer-local-value 'clatter-chathistory--last-timestamp buf)))
+                ;; New DM target: fetch latest
+                (clatter-chathistory-fetch-latest conn target)))))))))
 
 ;; --- Automatic fetch hooks ---
 
@@ -195,6 +243,9 @@ COUNT defaults to `clatter-chathistory-limit'."
   (add-hook 'clatter-privmsg-hook #'clatter-chathistory--track-timestamp)
   (add-hook 'clatter-batch-complete-hook
             #'clatter-chathistory--track-batch-timestamp)
+  (add-hook 'clatter-welcome-hook #'clatter-chathistory--on-welcome)
+  (add-hook 'clatter-batch-complete-hook
+            #'clatter-chathistory--on-targets-batch)
   (when (called-interactively-p 'interactive)
     (message "[clatter-chathistory] Enabled")))
 
@@ -205,6 +256,9 @@ COUNT defaults to `clatter-chathistory-limit'."
   (remove-hook 'clatter-privmsg-hook #'clatter-chathistory--track-timestamp)
   (remove-hook 'clatter-batch-complete-hook
                #'clatter-chathistory--track-batch-timestamp)
+  (remove-hook 'clatter-welcome-hook #'clatter-chathistory--on-welcome)
+  (remove-hook 'clatter-batch-complete-hook
+               #'clatter-chathistory--on-targets-batch)
   (message "[clatter-chathistory] Disabled"))
 
 ;; Enabled by `clatter-setup' when `clatter-chathistory-enabled' is
