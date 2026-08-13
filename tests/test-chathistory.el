@@ -48,7 +48,7 @@ It must not error on (downcase nil) and must not touch any buffer."
         (clatter-test-with-mock-send
           (clatter-chathistory-fetch-targets conn 50)
           (should (clatter-test-sent-matching
-                   "^CHATHISTORY TARGETS \\* \\* 50$")))
+                   "^CHATHISTORY TARGETS timestamp=0001-01-01T00:00:00.000Z timestamp=9999-12-31T23:59:59.999Z 50$")))
       (clatter-test-cleanup))))
 
 (ert-deftest clatter-chathistory-fetch-targets-no-cap-no-op ()

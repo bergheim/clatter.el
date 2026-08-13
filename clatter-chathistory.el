@@ -42,6 +42,14 @@
   :type 'boolean
   :group 'clatter)
 
+;; Sentinel bounds for CHATHISTORY TARGETS: the spec requires both bounds to
+;; be timestamps (the `*' wildcard is rejected as an invalid first bound), so
+;; use the widest possible range to request the most recently active targets.
+(defconst clatter-chathistory--first-bound "0001-01-01T00:00:00.000Z"
+  "Earliest timestamp sentinel for CHATHISTORY TARGETS requests.")
+(defconst clatter-chathistory--last-bound "9999-12-31T23:59:59.999Z"
+  "Latest timestamp sentinel for CHATHISTORY TARGETS requests.")
+
 ;; --- State ---
 
 (defvar-local clatter-chathistory--last-timestamp nil
@@ -112,11 +120,18 @@ Used on reconnect to fill in gaps."
   "Request CHATHISTORY TARGETS on CONN to discover DM targets with history.
 LIMIT defaults to `clatter-chathistory-limit'.  The server responds with a
 batch of type `chathistory-targets' listing channels and DM partners that
-have history, each with the timestamp of their latest message."
+have history, each with the timestamp of their latest message.
+
+Both bounds MUST be timestamps; the `*' wildcard is not valid for TARGETS
+(unlike LATEST), and servers reject it with CHATHISTORY/INVALID_PARAMS.
+Use sentinel bounds to request the most recently active targets."
   (when (clatter-chathistory--available-p conn)
     (let ((n (or limit clatter-chathistory-limit)))
       (clatter-send conn
-                    (format "CHATHISTORY TARGETS * * %d" n)))))
+                    (format
+                     "CHATHISTORY TARGETS timestamp=%s timestamp=%s %d"
+                     clatter-chathistory--first-bound
+                     clatter-chathistory--last-bound n)))))
 
 (defun clatter-chathistory--on-welcome (conn _nick)
   "On welcome (001), request CHATHISTORY TARGETS to discover missed DMs.
