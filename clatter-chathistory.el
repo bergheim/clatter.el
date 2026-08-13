@@ -42,13 +42,16 @@
   :type 'boolean
   :group 'clatter)
 
-;; Sentinel bounds for CHATHISTORY TARGETS: the spec requires both bounds to
-;; be timestamps (the `*' wildcard is rejected as an invalid first bound), so
-;; use the widest possible range to request the most recently active targets.
-(defconst clatter-chathistory--first-bound "0001-01-01T00:00:00.000Z"
-  "Earliest timestamp sentinel for CHATHISTORY TARGETS requests.")
-(defconst clatter-chathistory--last-bound "9999-12-31T23:59:59.999Z"
-  "Latest timestamp sentinel for CHATHISTORY TARGETS requests.")
+;; Sentinel bounds for CHATHISTORY TARGETS.  Both bounds must be timestamps
+;; (the `*' wildcard is only valid for LATEST), and they carry BETWEEN
+;; semantics: the newest bound comes first so that a truncating limit keeps
+;; the most recently active targets.  The oldest bound must not be the zero
+;; time (0001-01-01T00:00:00.000Z): soju parses bounds into Go time values
+;; and rejects the zero value with "Invalid first bound".
+(defconst clatter-chathistory--newest-bound "9999-12-31T23:59:59.999Z"
+  "Newest timestamp sentinel for CHATHISTORY TARGETS requests.")
+(defconst clatter-chathistory--oldest-bound "1970-01-01T00:00:00.000Z"
+  "Oldest timestamp sentinel for CHATHISTORY TARGETS requests.")
 
 ;; --- State ---
 
@@ -124,14 +127,15 @@ have history, each with the timestamp of their latest message.
 
 Both bounds MUST be timestamps; the `*' wildcard is not valid for TARGETS
 (unlike LATEST), and servers reject it with CHATHISTORY/INVALID_PARAMS.
-Use sentinel bounds to request the most recently active targets."
+The newest sentinel bound is sent first so that servers truncating the
+list at LIMIT keep the most recently active targets."
   (when (clatter-chathistory--available-p conn)
     (let ((n (or limit clatter-chathistory-limit)))
       (clatter-send conn
                     (format
                      "CHATHISTORY TARGETS timestamp=%s timestamp=%s %d"
-                     clatter-chathistory--first-bound
-                     clatter-chathistory--last-bound n)))))
+                     clatter-chathistory--newest-bound
+                     clatter-chathistory--oldest-bound n)))))
 
 (defun clatter-chathistory--on-welcome (conn _nick)
   "On welcome (001), request CHATHISTORY TARGETS to discover missed DMs.
@@ -142,13 +146,24 @@ Without TARGETS, DMs received while offline are never fetched."
              (clatter-chathistory--available-p conn))
     (clatter-chathistory-fetch-targets conn)))
 
-(defun clatter-chathistory--on-targets-batch (conn _batch-type _target messages)
+(defun clatter-chathistory--targets-batch-p (batch-type)
+  "Return non-nil if BATCH-TYPE names a chathistory-targets batch.
+Servers send either `chathistory-targets' or the draft name
+`draft/chathistory-targets'."
+  (and (stringp batch-type)
+       (member batch-type '("chathistory-targets" "draft/chathistory-targets"))
+       t))
+
+(defun clatter-chathistory--on-targets-batch (conn batch-type _target messages)
   "Process a completed chathistory-targets batch.
+BATCH-TYPE must name a targets batch; other batches are ignored so that
+ordinary history playback never triggers another round of fetches.
 MESSAGES is a list of plists with :target and :time keys.  For each
 target that is a DM (not a channel), fetch latest history if we don't
 already have a buffer for it, or fetch since the last known timestamp
 if we do."
   (when (and clatter-chathistory-enabled
+             (clatter-chathistory--targets-batch-p batch-type)
              (clatter-chathistory--available-p conn))
     (let ((network (clatter-connection-network-id conn))
           (my-nick (clatter-connection-nick conn)))

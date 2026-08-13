@@ -597,16 +597,24 @@ Return the trimmed character."
                                conn parsed-prefix target react-emoji react-msgid))))
 
       ;; --- CHATHISTORY (IRCv3 - TARGETS response entries) ---
+      ;; Format: CHATHISTORY TARGETS <target> <timestamp>.  The timestamp is
+      ;; a regular parameter, not a server-time tag, so parse it from PARAMS
+      ;; and fall back to the tag if a server ever sends one.
       ("CHATHISTORY"
        (let* ((parsed-tags (clatter-parse-tags tags))
               (batch-id (clatter-get-parsed-tag parsed-tags "batch"))
-              (server-time (clatter-get-parsed-server-time parsed-tags)))
-         (when batch-id
-           (let ((batch (gethash batch-id (clatter-connection-active-batches conn))))
-             (when batch
+              (subcommand (nth 0 params)))
+         (when (and batch-id subcommand
+                    (string-equal-ignore-case subcommand "TARGETS"))
+           (let ((batch (gethash batch-id (clatter-connection-active-batches conn)))
+                 (target (nth 1 params))
+                 (time-str (nth 2 params)))
+             (when (and batch target)
                (push (list :type 'chathistory-targets
-                           :target (nth 0 params)
-                           :time server-time)
+                           :target target
+                           :time (or (and time-str
+                                          (clatter-parse-iso8601 time-str))
+                                     (clatter-get-parsed-server-time parsed-tags)))
                      (plist-get batch :messages)))))))
 
       ;; --- MARKREAD (IRCv3 read-marker) ---

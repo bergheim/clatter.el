@@ -48,7 +48,7 @@ It must not error on (downcase nil) and must not touch any buffer."
         (clatter-test-with-mock-send
           (clatter-chathistory-fetch-targets conn 50)
           (should (clatter-test-sent-matching
-                   "^CHATHISTORY TARGETS timestamp=0001-01-01T00:00:00.000Z timestamp=9999-12-31T23:59:59.999Z 50$")))
+                   "^CHATHISTORY TARGETS timestamp=9999-12-31T23:59:59.999Z timestamp=1970-01-01T00:00:00.000Z 50$")))
       (clatter-test-cleanup))))
 
 (ert-deftest clatter-chathistory-fetch-targets-no-cap-no-op ()
@@ -169,6 +169,77 @@ It must not error on (downcase nil) and must not touch any buffer."
           (clatter-chathistory--on-targets-batch
            conn "chathistory-targets" nil nil)
           (should-not clatter-test--sent-lines))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-chathistory-fetch-targets-bounds-are-not-zero-time ()
+  "TARGETS bounds must never be the zero time, which soju rejects.
+soju parses each bound into a Go time value and answers
+FAIL CHATHISTORY INVALID_PARAMS ... \"Invalid first bound\" for the zero
+value, which is exactly 0001-01-01T00:00:00.000Z."
+  (let ((conn (clatter-test-make-connection-with-caps
+               '("server-time" "batch" "message-tags" "chathistory"))))
+    (unwind-protect
+        (clatter-test-with-mock-send
+          (clatter-chathistory-fetch-targets conn 50)
+          (let ((line (clatter-test-last-sent)))
+            (should-not (string-match-p "0001-01-01" line))
+            ;; Newest bound first: a truncating server keeps recent targets.
+            (should (string-match-p
+                     "TARGETS timestamp=9999-.* timestamp=1970-" line))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-chathistory-targets-batch-ignores-other-batch-types ()
+  "A non-targets batch never triggers target fetches."
+  (let ((conn (clatter-test-make-connection-with-caps
+               '("server-time" "batch" "message-tags" "chathistory"))))
+    (unwind-protect
+        (clatter-test-with-mock-send
+          (clatter-chathistory--on-targets-batch
+           conn "chathistory" "alcor"
+           (list (list :target "alcor" :time (encode-time 0 0 12 1 1 2026 t))))
+          (should-not clatter-test--sent-lines))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-chathistory-targets-response-parses-target-and-time ()
+  "A CHATHISTORY TARGETS batch line yields the target name and its time.
+The name is the second parameter, not the TARGETS subcommand, and the
+timestamp is a parameter rather than a server-time tag."
+  (let ((conn (clatter-test-make-connection-with-caps
+               '("server-time" "batch" "message-tags" "chathistory")))
+        (entries nil))
+    (unwind-protect
+        (let ((clatter-batch-complete-hook
+               (list (lambda (_conn batch-type _target messages)
+                       (when (clatter-chathistory--targets-batch-p batch-type)
+                         (setq entries messages))))))
+          (clatter-dispatch-message
+           conn (clatter-test-parse "BATCH +tgt draft/chathistory-targets"))
+          (clatter-dispatch-message
+           conn (clatter-test-parse
+                 "@batch=tgt CHATHISTORY TARGETS alcor 2026-01-01T12:00:00.000Z"))
+          (clatter-dispatch-message conn (clatter-test-parse "BATCH -tgt"))
+          (should (= (length entries) 1))
+          (should (equal (plist-get (car entries) :target) "alcor"))
+          (should (equal (plist-get (car entries) :time)
+                         (clatter-parse-iso8601 "2026-01-01T12:00:00.000Z"))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-chathistory-targets-response-fetches-dm-history ()
+  "An end-to-end TARGETS batch fetches history for the DM target."
+  (let ((conn (clatter-test-make-connection-with-caps
+               '("server-time" "batch" "message-tags" "chathistory"))))
+    (unwind-protect
+        (let ((clatter-batch-complete-hook
+               (list #'clatter-chathistory--on-targets-batch)))
+          (clatter-test-with-mock-send
+            (clatter-dispatch-message
+             conn (clatter-test-parse "BATCH +tgt draft/chathistory-targets"))
+            (clatter-dispatch-message
+             conn (clatter-test-parse
+                   "@batch=tgt CHATHISTORY TARGETS alcor 2026-01-01T12:00:00.000Z"))
+            (clatter-dispatch-message conn (clatter-test-parse "BATCH -tgt"))
+            (should (clatter-test-sent-matching "^CHATHISTORY LATEST alcor \\* 50$"))
+            (should-not (clatter-test-sent-matching "TARGETS TARGETS"))))
       (clatter-test-cleanup))))
 
 (provide 'test-chathistory)
