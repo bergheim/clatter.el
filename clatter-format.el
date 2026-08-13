@@ -78,6 +78,12 @@ Overrides `clatter-format-enable'."
     (aref clatter-format--mirc-colors-extended (- idx 16)))
    (t nil)))
 
+(defun clatter-format--ascii-digit-p (ch)
+  "Return non-nil if CH is an ASCII digit (?0..?9).
+mIRC color codes only use ASCII digits; unlike `cl-digit-char-p',
+this never errors on non-Latin-1 codepoints (e.g. U+2234)."
+  (and (<= ?0 ch) (<= ch ?9)))
+
 ;; --- Formatting code constants ---
 
 (defconst clatter-format--bold      ?\x02)
@@ -169,21 +175,21 @@ If `clatter-format-enable' is nil, returns TEXT unchanged."
          ;; Color code: \x03[fg[,bg]]
          ((= ch clatter-format--color)
           (cl-incf pos)
-          (if (and (< pos len) (cl-digit-char-p (aref text pos)))
+          (if (and (< pos len) (clatter-format--ascii-digit-p (aref text pos)))
               ;; Parse foreground
               (let ((fg-start pos))
-                (while (and (< pos len) (cl-digit-char-p (aref text pos))
+                (while (and (< pos len) (clatter-format--ascii-digit-p (aref text pos))
                             (< (- pos fg-start) 2))
                   (cl-incf pos))
                 (setq fg-color (clatter-format--color-for-index
                                 (string-to-number (substring text fg-start pos))))
                 ;; Optional background
                 (if (and (< pos len) (= (aref text pos) ?,)
-                         (< (1+ pos) len) (cl-digit-char-p (aref text (1+ pos))))
+                         (< (1+ pos) len) (clatter-format--ascii-digit-p (aref text (1+ pos))))
                     (progn
                       (cl-incf pos) ; skip comma
                       (let ((bg-start pos))
-                        (while (and (< pos len) (cl-digit-char-p (aref text pos))
+                        (while (and (< pos len) (clatter-format--ascii-digit-p (aref text pos))
                                     (< (- pos bg-start) 2))
                           (cl-incf pos))
                         (setq bg-color (clatter-format--color-for-index
