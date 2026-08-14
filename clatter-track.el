@@ -85,6 +85,14 @@ Collisions are disambiguated by extending each name until unique."
                  (const :tag "Syllable / CamelHump" syllable))
   :group 'clatter)
 
+(defcustom clatter-track-switch-return-to-origin t
+  "When non-nil, `clatter-track-switch' returns to the buffer you started
+switching from once all active clatter buffers have been visited.  The
+origin is captured on the first switch of a sequence and cleared on
+return, so each switching session starts a fresh origin."
+  :type 'boolean
+  :group 'clatter)
+
 (defcustom clatter-track-show-counts t
   "Show unread message counts in the track indicator."
   :type 'boolean
@@ -162,6 +170,11 @@ so the crumbs appear everywhere.  Setting this through Customize or
 
 (defvar clatter-track--string ""
   "Current track string for the mode-line.")
+
+(defvar clatter-track--switch-origin nil
+  "Buffer the user was in before the current `clatter-track-switch' sequence.
+Captured on the first successful switch of a sequence and cleared when
+the sequence returns to this buffer on activity exhaustion.")
 
 ;; --- Track info collection ---
 
@@ -517,14 +530,29 @@ targets are included because this command clears Clatter's entire read state."
 
 (defun clatter-track-switch ()
   "Switch to the clatter buffer with the most urgent activity.
-Priority: mentions > DMs > highest unread count."
+Priority: mentions > DMs > highest unread count.  When all active
+clatter buffers have been visited, the next invocation returns to the
+buffer you started switching from (see
+`clatter-track-switch-return-to-origin')."
   (interactive)
   (let ((infos (clatter-track--collect)))
     (if infos
         (let ((buf (plist-get (car infos) :buffer)))
+          ;; Capture the origin on the first switch of a sequence.
+          (when (and clatter-track-switch-return-to-origin
+                     (null clatter-track--switch-origin))
+            (setq clatter-track--switch-origin (current-buffer)))
           (switch-to-buffer buf)
           (clatter-clear-activity buf))
-      (message "No clatter activity"))))
+      (if (and clatter-track-switch-return-to-origin
+               clatter-track--switch-origin
+               (buffer-live-p clatter-track--switch-origin))
+          (let ((origin clatter-track--switch-origin))
+            (setq clatter-track--switch-origin nil)
+            (switch-to-buffer origin)
+            (message "Returned to %s" (buffer-name origin)))
+        (setq clatter-track--switch-origin nil)
+        (message "No clatter activity")))))
 
 (defun clatter--activity-entries ()
   "Return `tabulated-list-entries' for the `*clatter-activity*' buffer.

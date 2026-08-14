@@ -212,6 +212,73 @@
           (should-not (member "#chan" clatter-track-muted-channels))
           (should-not (string-match-p "muted" (buffer-string))))))))
 
+;;; clatter-track-switch return-to-origin
+
+(ert-deftest clatter-track-switch-returns-to-origin-on-exhaustion ()
+  "After visiting the last active buffer, the next switch returns to origin."
+  (let ((clatter-track-switch-return-to-origin t)
+        (clatter-track-shorten 100))
+    (clatter-activity-test--cleanup
+      (cl-letf (((symbol-function 'clatter-read-state-record-buffer)
+                 (lambda (_buffer))))
+        (let ((origin (generate-new-buffer " *origin*"))
+              (chan (clatter-get-or-create-buffer "sw" "#chan" 'channel)))
+          (with-current-buffer chan (setq clatter--unread-count 2))
+          (unwind-protect
+              (progn
+                (switch-to-buffer origin)
+                (setq clatter-track--switch-origin nil)
+                ;; First switch jumps to the active buffer and captures origin.
+                (clatter-track-switch)
+                (should (eq (window-buffer (selected-window)) chan))
+                (should (eq clatter-track--switch-origin origin))
+                ;; Activity is now exhausted: return to origin.
+                (clatter-track-switch)
+                (should (eq (window-buffer (selected-window)) origin))
+                (should (null clatter-track--switch-origin)))
+            (kill-buffer origin)))))))
+
+(ert-deftest clatter-track-switch-no-activity-when-nothing-active ()
+  "With no active buffers and no prior switch, it messages and stays put."
+  (let ((clatter-track-switch-return-to-origin t))
+    (clatter-activity-test--cleanup
+      (let ((origin (generate-new-buffer " *origin*")))
+        (unwind-protect
+            (progn
+              (switch-to-buffer origin)
+              (setq clatter-track--switch-origin nil)
+              (clatter-track-switch)
+              (should (eq (window-buffer (selected-window)) origin))
+              (should (null clatter-track--switch-origin)))
+          (kill-buffer origin))))))
+
+(ert-deftest clatter-track-switch-cycles-then-returns-to-origin ()
+  "Multiple active buffers are visited by priority, then origin is restored."
+  (let ((clatter-track-switch-return-to-origin t)
+        (clatter-track-shorten 100))
+    (clatter-activity-test--cleanup
+      (cl-letf (((symbol-function 'clatter-read-state-record-buffer)
+                 (lambda (_buffer))))
+        (let ((origin (generate-new-buffer " *origin*"))
+              (alpha (clatter-get-or-create-buffer "sw" "#alpha" 'channel))
+              (beta (clatter-get-or-create-buffer "sw" "#beta" 'channel)))
+          (with-current-buffer alpha (setq clatter--unread-count 5))
+          (with-current-buffer beta (setq clatter--unread-count 1))
+          (unwind-protect
+              (progn
+                (switch-to-buffer origin)
+                (setq clatter-track--switch-origin nil)
+                ;; Higher unread first.
+                (clatter-track-switch)
+                (should (eq (window-buffer (selected-window)) alpha))
+                (clatter-track-switch)
+                (should (eq (window-buffer (selected-window)) beta))
+                ;; Exhausted: return to origin.
+                (clatter-track-switch)
+                (should (eq (window-buffer (selected-window)) origin))
+                (should (null clatter-track--switch-origin)))
+            (kill-buffer origin)))))))
+
 (provide 'test-track)
 
 ;;; test-track.el ends here
