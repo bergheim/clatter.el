@@ -70,10 +70,19 @@ or (\"#spam\" \"#bots\") to omit selected channels."
   :type '(alist :key-type symbol :value-type face)
   :group 'clatter)
 
-(defcustom clatter-track-shorten-names t
-  "Shorten buffer names in the track indicator.
-Removes the clatter: prefix and network name."
-  :type 'boolean
+(defcustom clatter-track-shorten 5
+  "Shorten channel names in the track indicator.
+nil shows the full buffer name, including the clatter:network/ prefix.
+An integer N truncates the channel name body to N chars; e.g. 5 turns
+#systemcrafters into #syst.  `drop-vowels' strips vowels from the body.
+`syllable' keeps the first char of each CamelCase or delimiter segment,
+lowercased (so #system-crafters becomes #sc).  Only channel targets
+(#, &, !, +) are shortened; query nicks and `*server*' are unchanged.
+Collisions are disambiguated by extending each name until unique."
+  :type '(choice (const :tag "Off (full buffer name)" nil)
+                 (integer :tag "Truncate to N chars")
+                 (const :tag "Drop vowels" drop-vowels)
+                 (const :tag "Syllable / CamelHump" syllable))
   :group 'clatter)
 
 (defcustom clatter-track-show-counts t
@@ -156,6 +165,108 @@ so the crumbs appear everywhere.  Setting this through Customize or
 
 ;; --- Track info collection ---
 
+(defun clatter-track--drop-vowels (body)
+  "Return BODY with ASCII vowels removed, keeping at least one char."
+  (let (chars)
+    (dotimes (i (length body))
+      (let ((c (aref body i)))
+        (unless (memq c '(?a ?e ?i ?o ?u ?A ?E ?I ?O ?U))
+          (push c chars))))
+    (let ((res (apply #'string (nreverse chars))))
+      (if (string-empty-p res)
+          (substring body 0 (min 1 (length body)))
+        res))))
+
+(defun clatter-track--syllable-abbrev (body)
+  "Return the first char of each segment of BODY.
+Segments split on `-', `_', `/' and on uppercase (CamelCase) boundaries."
+  (let (segs cur)
+    (dotimes (i (length body))
+      (let ((c (aref body i)))
+        (cond
+         ((memq c '(?- ?_ ?/))
+          (when cur (push cur segs))
+          (setq cur nil))
+         ((and (> i 0) (<= ?A c) (<= c ?Z))
+          (when cur (push cur segs))
+          (setq cur (string c)))
+         (t
+          (setq cur (concat (or cur "") (string c)))))))
+    (when cur (push cur segs))
+    (let ((abbr (apply #'concat (mapcar (lambda (s) (substring s 0 1))
+                                        (nreverse segs)))))
+      (if (string-empty-p abbr) body abbr))))
+
+(defun clatter-track--style-body (body)
+  "Apply the active shortening style to a channel name BODY (no prefix).
+The style is selected by `clatter-track-shorten': `drop-vowels' or
+`syllable' transform the body; an integer (truncate) or nil leaves it
+intact, since truncation is applied separately as a cap."
+  (pcase clatter-track-shorten
+    ('drop-vowels (clatter-track--drop-vowels body))
+    ('syllable (downcase (clatter-track--syllable-abbrev body)))
+    (_ body)))
+
+(defun clatter-track--shorten-target (target &optional cap)
+  "Shorten channel TARGET per `clatter-track-shorten', capped at CAP chars.
+CAP defaults to `clatter-track-shorten' when that is an integer, or the
+full styled length otherwise.  Non-channel targets (nicks, `*server*')
+are returned unchanged."
+  (if (or (null target) (not (string-match-p "^[#&!+]" target)))
+      target
+    (let* ((prefix (substring target 0 1))
+           (styled (clatter-track--style-body (substring target 1)))
+           (limit (or cap
+                      (and (integerp clatter-track-shorten)
+                           clatter-track-shorten)
+                      (length styled))))
+      (concat prefix (substring styled 0 (min limit (length styled)))))))
+
+(defun clatter-track--uniquify-short-names (infos)
+  "Disambiguate colliding shortened channel names in INFOS.
+Extends each colliding channel's cap by one char until its short name is
+unique or the full styled body is exhausted.  Mutates each channel info's
+:name; non-channel infos are left alone.  Returns INFOS."
+  (let ((entries
+         (delq nil
+          (mapcar
+           (lambda (info)
+             (let ((raw (with-current-buffer (plist-get info :buffer)
+                          clatter--target)))
+               (when (and raw (string-match-p "^[#&!+]" raw))
+                 (let* ((styled (clatter-track--style-body (substring raw 1)))
+                        (base (or (and (integerp clatter-track-shorten)
+                                       clatter-track-shorten)
+                                  (length styled))))
+                   (list info raw (substring raw 0 1) styled base)))))
+           infos))))
+    (when entries
+      (let (changed)
+        (while (progn
+                 (setq changed nil)
+                 (let ((names (mapcar (lambda (e)
+                                        (clatter-track--shorten-target
+                                         (nth 1 e) (nth 4 e)))
+                                      entries)))
+                   (dotimes (i (length entries))
+                     (let* ((e (nth i entries))
+                            (name (nth i names))
+                            (styled (nth 3 e))
+                            (cap (nth 4 e)))
+                       (when (and (< cap (length styled))
+                                  (cl-some (lambda (j)
+                                             (and (/= j i)
+                                                  (equal (nth j names) name)))
+                                           (number-sequence
+                                            0 (1- (length entries)))))
+                         (setf (nth 4 e) (1+ cap))
+                         (setq changed t))))
+                   changed))))
+      (dolist (e entries)
+        (setf (plist-get (nth 0 e) :name)
+              (clatter-track--shorten-target (nth 1 e) (nth 4 e)))))
+    infos))
+
 (defun clatter-track--buffer-info (buf)
   "Return activity info for BUF as plist, or nil if no activity.
 Plist keys: :buffer :name :unread :mention :muted :dm"
@@ -168,8 +279,8 @@ Plist keys: :buffer :name :unread :mention :muted :dm"
         (let* ((target clatter--target)
                (is-channel (and target (string-match-p "^[#&!+]" target)))
                (is-muted (member target clatter-track-muted-channels))
-               (display-name (if clatter-track-shorten-names
-                                 target
+               (display-name (if clatter-track-shorten
+                                 (clatter-track--shorten-target target)
                                (buffer-name buf))))
           (list :buffer buf
                 :name display-name
@@ -187,18 +298,23 @@ Returns list of plists sorted by priority: mentions > DMs > activity."
         (when info
           (push info infos))))
     ;; Sort: mentions first, then DMs, then regular activity
-    (sort infos
-          (lambda (a b)
-            (let ((a-mention (plist-get a :mention))
-                  (b-mention (plist-get b :mention))
-                  (a-dm (plist-get a :dm))
-                  (b-dm (plist-get b :dm)))
-              (cond
-               ((and a-mention (not b-mention)) t)
-               ((and b-mention (not a-mention)) nil)
-               ((and a-dm (not b-dm)) t)
-               ((and b-dm (not a-dm)) nil)
-               (t (> (plist-get a :unread) (plist-get b :unread)))))))))
+    (let ((sorted (sort infos
+                        (lambda (a b)
+                          (let ((a-mention (plist-get a :mention))
+                                (b-mention (plist-get b :mention))
+                                (a-dm (plist-get a :dm))
+                                (b-dm (plist-get b :dm)))
+                            (cond
+                             ((and a-mention (not b-mention)) t)
+                             ((and b-mention (not a-mention)) nil)
+                             ((and a-dm (not b-dm)) t)
+                             ((and b-dm (not a-dm)) nil)
+                             (t (> (plist-get a :unread)
+                                   (plist-get b :unread)))))))))
+      ;; Disambiguate colliding shortened channel names after sorting.
+      (when clatter-track-shorten
+        (clatter-track--uniquify-short-names sorted))
+      sorted)))
 
 ;; --- Format track string ---
 

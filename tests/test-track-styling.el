@@ -103,6 +103,53 @@
     (should (eq (get-text-property 0 'mouse-face entry) 'highlight))
     (should (keymapp (get-text-property 0 'local-map entry)))))
 
+;;; Target-name shortening
+
+(ert-deftest clatter-track-shorten-truncate ()
+  "An integer N keeps the prefix plus the first N chars of the body."
+  (let ((clatter-track-shorten 3))
+    (should (equal (clatter-track--shorten-target "#systemcrafters") "#sys"))
+    (should (equal (clatter-track--shorten-target "#emacs") "#ema"))))
+
+(ert-deftest clatter-track-shorten-large-cap-preserves-name ()
+  "A cap larger than the body leaves the full target unchanged."
+  (let ((clatter-track-shorten 100))
+    (should (equal (clatter-track--shorten-target "#systemcrafters")
+                   "#systemcrafters"))))
+
+(ert-deftest clatter-track-shorten-drop-vowels ()
+  "The `drop-vowels' style strips vowels from the body."
+  (let ((clatter-track-shorten 'drop-vowels))
+    (should (equal (clatter-track--shorten-target "#systemcrafters")
+                   "#systmcrftrs"))))
+
+(ert-deftest clatter-track-shorten-syllable ()
+  "The `syllable' style takes the first char of each segment, lowercased."
+  (let ((clatter-track-shorten 'syllable))
+    (should (equal (clatter-track--shorten-target "#system-crafters") "#sc"))
+    (should (equal (clatter-track--shorten-target "#LiberaChat") "#lc"))))
+
+(ert-deftest clatter-track-shorten-leaves-non-channels ()
+  "Query nicks and the server buffer are never shortened."
+  (let ((clatter-track-shorten 2))
+    (should (equal (clatter-track--shorten-target "alice") "alice"))
+    (should (equal (clatter-track--shorten-target "*server*") "*server*"))))
+
+(ert-deftest clatter-track-shorten-uniquifies-collisions ()
+  "Colliding shortened channel names are extended until unique."
+  (let ((clatter-track-shorten 3))
+    (unwind-protect
+        (let ((crafters (clatter-get-or-create-buffer
+                         "net" "#systemcrafters" 'channel))
+              (syslog (clatter-get-or-create-buffer "net" "#syslog" 'channel)))
+          (with-current-buffer crafters (setq clatter--unread-count 1))
+          (with-current-buffer syslog (setq clatter--unread-count 1))
+          (let ((names (mapcar (lambda (i) (plist-get i :name))
+                               (clatter-track--collect))))
+            ;; Both start as #sys; uniquify extends them to differ.
+            (should (equal (sort names #'string<) '("#sysl" "#syst")))))
+      (clatter-test-cleanup))))
+
 (provide 'test-track-styling)
 
 ;;; test-track-styling.el ends here

@@ -115,7 +115,7 @@
 
 (ert-deftest clatter-activity-list-renders-tabulated-entries ()
   "`*clatter-activity*' is a tabulated list whose entry id is the clatter buffer."
-  (let ((clatter-track-shorten-names t)
+  (let ((clatter-track-shorten 100)
         (clatter-track-exclude-targets nil)
         (clatter-track-muted-channels '("#muted")))
     (clatter-activity-test--cleanup
@@ -149,7 +149,7 @@
 
 (ert-deftest clatter-activity-jump-switches-to-buffer-and-clears ()
   "`clatter-activity-jump' selects the entry's clatter buffer and clears it."
-  (let ((clatter-track-shorten-names t)
+  (let ((clatter-track-shorten 100)
         (clatter-track-exclude-targets nil)
         recorded)
     (clatter-activity-test--cleanup
@@ -171,7 +171,7 @@
 
 (ert-deftest clatter-activity-clear-clears-entry-at-point ()
   "`clatter-activity-clear' clears the entry at point and refreshes the list."
-  (let ((clatter-track-shorten-names t)
+  (let ((clatter-track-shorten 100)
         (clatter-track-exclude-targets nil)
         recorded)
     (clatter-activity-test--cleanup
@@ -195,7 +195,7 @@
 
 (ert-deftest clatter-activity-mute-and-unmute-toggle-target-at-point ()
   "`clatter-activity-mute' and `clatter-activity-unmute' toggle the point target."
-  (let ((clatter-track-shorten-names t)
+  (let ((clatter-track-shorten 100)
         (clatter-track-exclude-targets nil)
         (clatter-track-muted-channels nil))
     (clatter-activity-test--cleanup
