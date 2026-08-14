@@ -1881,6 +1881,214 @@ last ran a query command."
                                   (not (eq (car cell) chan)))
                                 inserted))))))
 
+;;; Nick-grouping helpers
+
+(defun clatter-test--find-line-bol (buffer text)
+  "Return the bol of the line in BUFFER whose text contains TEXT, or nil."
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char (point-min))
+      (when (search-forward text nil t)
+        (beginning-of-line)
+        (point)))))
+
+(defun clatter-test--nick-column-at (buffer bol)
+  "Return the visible nick-column text (first `clatter-nick-column-width' chars) at BOL in BUFFER."
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char bol)
+      (buffer-substring-no-properties
+       bol (min (+ bol clatter-nick-column-width) (line-end-position))))))
+
+(defmacro clatter-test--with-grouping-buffer (order conn &rest body)
+  "Run BODY in a fresh clatter buffer with nick grouping setup.
+ORDER is the `clatter-message-order', CONN the mock connection."
+  (declare (indent 2))
+  `(with-temp-buffer
+     (let ((clatter-message-order ,order))
+       (clatter-mode)
+       (setq-local clatter--network "testnet")
+       (setq-local clatter--target "#test")
+       (clatter-ui-setup-buffer (current-buffer))
+       ,@body)))
+
+(ert-deftest clatter-group-messages-blanks-consecutive-same-nick ()
+  "A burst of same-nick PRIVMSGs shows the nick once; later lines are blanked."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t))
+    (unwind-protect
+        (dolist (order '(oldest-first newest-first))
+          (clatter-test--with-grouping-buffer order conn
+            (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+            (clatter-insert-privmsg (current-buffer) "alice" "second" conn)
+            (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                  (second-bol (clatter-test--find-line-bol (current-buffer) "second")))
+              (should first-bol)
+              (should second-bol)
+              ;; Chronologically-first keeps the nick; "second" is blanked.
+              (should (string-match-p "<alice>"
+                                      (clatter-test--nick-column-at
+                                       (current-buffer) first-bol)))
+              (should (string-match-p "\\` *\\'"
+                                      (clatter-test--nick-column-at
+                                       (current-buffer) second-bol)))
+              ;; Sender metadata survives on the blanked line.
+              (should (equal (get-text-property second-bol 'clatter-sender) "alice"))
+              (should (eq (get-text-property second-bol 'clatter-msg-type) 'privmsg)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-breaks-on-different-nick ()
+  "An intervening message from another nick breaks the burst."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+          (clatter-insert-privmsg (current-buffer) "bob" "second" conn)
+          (clatter-insert-privmsg (current-buffer) "alice" "third" conn)
+          (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                (second-bol (clatter-test--find-line-bol (current-buffer) "second"))
+                (third-bol (clatter-test--find-line-bol (current-buffer) "third")))
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) first-bol)))
+            (should (string-match-p "<bob>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) second-bol)))
+            ;; "third" is not blanked: bob broke alice's burst.
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) third-bol)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-breaks-on-action ()
+  "An action between same-nick PRIVMSGs breaks the burst."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+          (clatter-insert-action (current-buffer) "alice" "waves" conn)
+          (clatter-insert-privmsg (current-buffer) "alice" "third" conn)
+          (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                (third-bol (clatter-test--find-line-bol (current-buffer) "third")))
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) first-bol)))
+            ;; The action broke the burst, so "third" shows its nick.
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) third-bol)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-respects-time-window ()
+  "Same-nick PRIVMSGs farther apart than the window are not grouped."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t)
+        (clatter-group-messages-window 10)
+        (t1 (seconds-to-time 1000))
+        (t2 (seconds-to-time 1020)))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (clatter-insert-privmsg (current-buffer) "alice" "first" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "second" conn t2)
+          (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                (second-bol (clatter-test--find-line-bol (current-buffer) "second")))
+            ;; 20s gap exceeds the 10s window: both show the nick.
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) first-bol)))
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) second-bol)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-off-by-default ()
+  "With grouping disabled, consecutive same-nick PRIVMSGs both show the nick."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick nil))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+          (clatter-insert-privmsg (current-buffer) "alice" "second" conn)
+          (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                (second-bol (clatter-test--find-line-bol (current-buffer) "second")))
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) first-bol)))
+            (should (string-match-p "<alice>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) second-bol)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-history-playback-uses-adjacency ()
+  "History playback groups same-nick bursts by visual adjacency, ignoring the
+time window, because backlog messages replay with widely spaced server-times."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (buf nil)
+        (clatter-group-messages-by-nick t)
+        (clatter-group-messages-window 10)
+        ;; 30min apart: a live burst would never group these.
+        (t1 (encode-time 0 0 11 1 1 2026 t))
+        (t2 (encode-time 0 0 11 30 1 1 2026 t))
+        (t3 (encode-time 0 0 12 1 1 2026 t)))
+    (unwind-protect
+        (progn
+          (setq buf (clatter-get-or-create-buffer "testnet" "#chan" 'channel))
+          (with-current-buffer buf (clatter-ui-setup-buffer buf))
+          ;; Messages arrive oldest-first, as CHATHISTORY playback delivers them.
+          (clatter-ui--on-batch-complete
+           conn "chathistory" "#chan"
+           (list (list :type 'privmsg :sender "alice" :text "first" :time t1)
+                 (list :type 'privmsg :sender "alice" :text "second" :time t2)
+                 (list :type 'privmsg :sender "alice" :text "third" :time t3)))
+          (with-current-buffer buf
+            (let ((first-bol (clatter-test--find-line-bol buf "first"))
+                  (second-bol (clatter-test--find-line-bol buf "second"))
+                  (third-bol (clatter-test--find-line-bol buf "third")))
+              ;; First message of the burst keeps the nick; the rest blank it.
+              (should (string-match-p "<alice>"
+                                      (clatter-test--nick-column-at buf first-bol)))
+              (should (string-match-p "\\` *\\'"
+                                      (clatter-test--nick-column-at buf second-bol)))
+              (should (string-match-p "\\` *\\'"
+                                      (clatter-test--nick-column-at buf third-bol)))
+              ;; The blanked columns still carry the sender for navigation.
+              (should (equal (get-text-property second-bol 'clatter-sender) "alice"))
+              (should (equal (get-text-property third-bol 'clatter-sender) "alice")))))
+      (clatter-test-cleanup)
+      (when buf
+        (clatter-remove-buffer "testnet" "#chan")
+        (when (buffer-live-p buf) (kill-buffer buf))))))
+
+(ert-deftest clatter-group-messages-reads-previous-in-target-buffer ()
+  "Grouping must read the previous line in the target buffer, not `current-buffer'.
+The process filter runs with a small auxiliary buffer current while
+`clatter-insert-privmsg' targets the channel buffer; reading the
+previous message's text properties there used to raise
+\"Args out of range\" because the position belonged to the channel."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (let ((chan (current-buffer)))
+            ;; Insert the first message normally to populate the buffer.
+            (clatter-insert-privmsg chan "alice" "first" conn)
+            ;; Insert the second from a tiny unrelated current buffer,
+            ;; mimicking the process filter's calling context.
+            (with-temp-buffer
+              (insert "x")
+              (clatter-insert-privmsg chan "alice" "second" conn))
+            (let ((second-bol (clatter-test--find-line-bol chan "second")))
+              (should second-bol)
+              ;; No error, and the second same-nick line is blanked.
+              (should (string-match-p "\\` *\\'"
+                                      (clatter-test--nick-column-at
+                                       chan second-bol)))
+              (should (equal (get-text-property second-bol 'clatter-sender)
+                             "alice")))))
+      (remhash "testnet" clatter-connections))))
+
 (provide 'test-ui)
 
 ;;; test-ui.el ends here

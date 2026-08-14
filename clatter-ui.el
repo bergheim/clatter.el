@@ -156,6 +156,25 @@ message ends the group."
   :type '(alist :key-type symbol :value-type string)
   :group 'clatter)
 
+(defcustom clatter-group-messages-by-nick nil
+  "Collapse the nick column on consecutive messages from the same nick.
+When non-nil, only the first message of a burst from a nick shows the
+nick prefix; subsequent same-nick PRIVMSG lines within
+`clatter-group-messages-window' seconds render a blank nick column.
+A burst is broken by an intervening message from another nick, an
+action, a notice, or a time gap larger than the window.  Only PRIVMSG
+lines are grouped; actions and notices always show their prefix."
+  :type 'boolean
+  :group 'clatter)
+
+(defcustom clatter-group-messages-window 300
+  "Seconds within which consecutive same-nick PRIVMSGs share one nick.
+A gap larger than this breaks the burst.  nil means adjacency only:
+any intervening line breaks the group but a time gap alone never does."
+  :type '(choice (const :tag "No time limit (adjacency only)" nil)
+                 (number :tag "Seconds"))
+  :group 'clatter)
+
 ;; --- Message insertion ---
 
 (defvar-local clatter--prompt-marker nil
@@ -370,23 +389,33 @@ POSITION defaults to point."
       (and (listp invisible)
            (memq 'clatter-fool invisible))))
 
-(defun clatter--format-nick-column (nick-str &optional face sender)
+(defun clatter--format-nick-column (nick-str &optional face sender blank)
   "Right-align NICK-STR within `clatter-nick-column-width'.
-Apply FACE and set clatter-sender property to SENDER if provided."
+Apply FACE and set clatter-sender property to SENDER if provided.
+When BLANK is non-nil, return a column of spaces (no nick text, no
+face) that still carries the `clatter-sender' and
+`clatter-navigation-target' properties, so grouped lines keep their
+sender metadata for navigation and highlighting."
   (let* ((width clatter-nick-column-width)
          (nick-len (length nick-str))
          (pad (max 0 (- width nick-len)))
          (nick-text (copy-sequence nick-str))
          (padded nil))
-    (when face
-      (add-face-text-property 0 (length nick-text) face nil nick-text))
-    (add-text-properties 0 (length nick-text)
-                         '(clatter-navigation-target message)
-                         nick-text)
-    (setq padded (concat (make-string pad ?\s) nick-text))
-    (when sender
-      (setq padded (propertize padded 'clatter-sender sender)))
-    padded))
+    (if blank
+        ;; Blank column for grouped messages: preserve alignment and the
+        ;; sender/navigation properties without rendering the nick itself.
+        (propertize (make-string width ?\s)
+                    'clatter-navigation-target 'message
+                    'clatter-sender sender)
+      (when face
+        (add-face-text-property 0 (length nick-text) face nil nick-text))
+      (add-text-properties 0 (length nick-text)
+                           '(clatter-navigation-target message)
+                           nick-text)
+      (setq padded (concat (make-string pad ?\s) nick-text))
+      (when sender
+        (setq padded (propertize padded 'clatter-sender sender)))
+      padded)))
 
 (defun clatter--format-system-prefix (prefix-str)
   "Right-align PREFIX-STR (e.g. \"***\") within the nick column."
@@ -397,6 +426,68 @@ Apply FACE and set clatter-sender property to SENDER if provided."
             (propertize prefix-str
                         'face 'clatter-system
                         'clatter-navigation-target 'message))))
+
+(defvar clatter--group-messages-adjacency-only nil
+  "When non-nil, `clatter--group-with-previous-p' ignores the time window.
+Bound around history/batch playback, which replays messages with their
+original (often widely spaced) timestamps: visual adjacency is the right
+grouping signal there, not the live burst window.")
+
+(defun clatter--previous-message-bol (&optional buffer)
+  "Return the bol of the chronologically-previous message in BUFFER.
+BUFFER defaults to the current buffer.  The neighbor is the message
+adjacent to where the next message will insert (at
+`clatter--messages-marker'), determined by `clatter-message-order':
+the line at the marker for `newest-first', the line above it for
+`oldest-first'.  Returns nil when the position is out of range or no
+message text properties are present there."
+  (let ((buf (or buffer (current-buffer))))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (let ((pos (or (and (markerp clatter--messages-marker)
+                            (marker-position clatter--messages-marker))
+                       (point-max))))
+          (save-excursion
+            (goto-char pos)
+            (unless (eq clatter-message-order 'newest-first)
+              (forward-line -1))
+            (let ((bol (line-beginning-position)))
+              (and (get-text-property bol 'clatter-sender)
+                   bol))))))))
+
+(defun clatter--group-with-previous-p (buffer sender server-time)
+  "Return non-nil when SENDER's new message groups with the previous one.
+This is true when `clatter-group-messages-by-nick' is enabled, the
+chronologically-previous message in BUFFER is a PRIVMSG from SENDER
+(case-insensitive), and the gap between the two is within
+`clatter-group-messages-window'.  When either timestamp is missing the
+window check is skipped (adjacency alone groups), as it is when
+`clatter--group-messages-adjacency-only' is set (e.g. during history
+playback).  SERVER-TIME is the Emacs time value of the new message; nil
+means now."
+  (and clatter-group-messages-by-nick
+       (let ((bol (clatter--previous-message-bol buffer)))
+         ;; `bol' is a position in BUFFER, so the text-property reads
+         ;; below must run there -- not in the caller's (often the
+         ;; process filter) buffer, whose size is unrelated and would
+         ;; raise "Args out of range".
+         (and bol
+              (with-current-buffer (or buffer (current-buffer))
+                (and (eq (get-text-property bol 'clatter-msg-type) 'privmsg)
+                     (let ((prev-sender (get-text-property bol
+                                                           'clatter-sender)))
+                       (and prev-sender
+                            (string-equal-ignore-case prev-sender sender)
+                            (let ((prev-time (get-text-property bol
+                                                                'clatter-server-time))
+                                  (new-time (or server-time (current-time))))
+                              (or (null clatter-group-messages-window)
+                                  clatter--group-messages-adjacency-only
+                                  (null prev-time)
+                                  (null new-time)
+                                  (<= (abs (float-time
+                                            (time-subtract new-time prev-time)))
+                                      clatter-group-messages-window)))))))))))
 
 (defun clatter--update-undo-list (shift)
   "Shift integer buffer positions in `buffer-undo-list' by SHIFT.
@@ -615,6 +706,11 @@ SERVER-TIME overrides the current time for the timestamp."
          (bot-tag (if (get-text-property 0 'clatter-bot sender)
                       (propertize clatter-bot-label 'face 'clatter-bot-label-face) ""))
          (bot-tag-delim (if (string-empty-p bot-tag) "" " "))
+         ;; Only PRIVMSG lines can be grouped onto the previous message's
+         ;; nick; actions and notices always show their own prefix and
+         ;; break any open burst.
+         (grouped-p (and (eq msg-type 'privmsg)
+                         (clatter--group-with-previous-p buffer sender server-time)))
          (nick-col (cond
                     ((eq 'action msg-type)
                      (clatter--format-nick-column "*" 'clatter-action sender))
@@ -623,9 +719,11 @@ SERVER-TIME overrides the current time for the timestamp."
                       (concat (format "-%s-" sender) bot-tag-delim bot-tag)
                       'clatter-notice))
                     (t
-                     (clatter--format-nick-column
-                      (concat (format "<%s>" sender) bot-tag-delim bot-tag)
-                      nick-face sender))))
+                     (if grouped-p
+                         (clatter--format-nick-column "" nil sender 'blank)
+                       (clatter--format-nick-column
+                        (concat (format "<%s>" sender) bot-tag-delim bot-tag)
+                        nick-face sender)))))
          (msg-text (prog1 hl-text
                      (cond
                       ((eq 'action msg-type)
@@ -2181,8 +2279,8 @@ otherwise (the process filter may run in any buffer, so don't rely on
   "Handle reconnect scheduling (DELAY, ATTEMPT) for UI in NETWORK-ID buffers."
   (dolist (buf (clatter-all-buffers network-id))
     (clatter-insert-system buf
-                            (format "Reconnecting in %ds (attempt %d)..."
-                                    delay attempt))))
+                           (format "Reconnecting in %ds (attempt %d)..."
+                                   delay attempt))))
 
 (defun clatter-ui--on-react (conn sender target emoji msgid)
   "Handle reaction on CONN: display EMOJI from NICK on message MSGID in TARGET."
@@ -2233,7 +2331,7 @@ otherwise (the process filter may run in any buffer, so don't rely on
                                        (add-face-text-property 0 (length formatted)
                                                                'clatter-muted-reaction nil
                                                                formatted))
-                                       formatted)))
+                                     formatted)))
                                new-reactions " ")))
                 ;; Remove old reaction overlay if any
                 (dolist (ov (overlays-at found))
@@ -2269,7 +2367,12 @@ Renders a visual separator before and after history playback."
         ;; Insert each message with dimmed style.  Suppress inline image
         ;; scanning/fetching for history playback: a large backlog would
         ;; otherwise scan every old message and stampede curl subprocesses.
-        (let ((clatter--suppress-image-scan t))
+        (let ((clatter--suppress-image-scan t)
+              ;; History replays messages with their original, often widely
+              ;; spaced server-times, so the live burst window would split a
+              ;; visual burst and re-show the nick on every line.  Group by
+              ;; adjacency instead.
+              (clatter--group-messages-adjacency-only t))
           (dolist (msg messages)
             (let* ((msg-type (plist-get msg :type))
                    (sender (plist-get msg :sender))
