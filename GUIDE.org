@@ -663,6 +663,22 @@ of one line each:
 | =clatter-compact-system-separator=     | =" · "=   | Separator between grouped events                      |
 | =clatter-compact-system-symbols=       | (glyphs) | Per-event glyphs: join =→=, part =←=, quit =×=, nick =»=, ... |
 
+*** Message grouping by nick
+
+Consecutive PRIVMSGs from the same nick can share a single nick prefix
+instead of repeating it on every line:
+
+| Variable                        | Default | Description                                                |
+|---------------------------------+---------+------------------------------------------------------------|
+| =clatter-group-messages-by-nick=  | =nil=     | Collapse the nick column on same-nick bursts               |
+| =clatter-group-messages-window=   | =300=     | Seconds within which same-nick lines group; =nil= for adjacency only |
+
+Only the chronologically-first message of a burst shows the nick; later
+same-nick PRIVMSGs within the window render a blank column that still
+carries the sender metadata for navigation and highlighting. A burst is
+broken by a message from another nick, an action, a notice, or a gap
+larger than the window. Actions and notices are never themselves grouped.
+
 ** Input
 
 | Variable                      | Default   | Description                                        |
@@ -721,17 +737,31 @@ argument to refresh faces already in use).
 | =clatter-track-position=         | ='after-modes=  | Placement within the mode line                 |
 | =clatter-track-muted-channels=   | =nil=            | Targets dimmed but still tracked               |
 | =clatter-track-exclude-targets=  | =nil=            | Targets hidden from every tracker surface      |
-| =clatter-track-shorten-names=    | =t=              | Abbreviate channel names in the indicator      |
+| =clatter-track-shorten=          | =5=              | =nil=, an integer N, =drop-vowels= or =syllable= channel shortening |
 | =clatter-track-show-counts=      | =t=              | Show unread counts                             |
 | =clatter-track-count-style=      | ='suffix=       | =suffix=, =superscript=, =subscript=, =glyph=, =none=    |
 | =clatter-track-indicators=       | =@= / =*= / (none) | Prefix glyph for mention / DM / activity       |
 | =clatter-track-faces-alist=      | (4 faces)      | Face per activity type                         |
 | =clatter-track-in-buffer-mode-line= | =nil=       | Also show crumbs in each clatter buffer        |
+| =clatter-track-switch-return-to-origin= | =t=    | =clatter-track-switch= returns to the start buffer when exhausted |
 
 Mentions sort above DMs, which sort above plain activity.
 =M-x clatter-track-switch= jumps to the most urgent buffer and
 =M-x clatter-track-list= shows everything. Mode-line entries are clickable. With
 =consult= installed, narrow =consult-buffer= with =i= to see tracked buffers.
+
+When =clatter-track-shorten= is non-nil, channel names are shortened in the
+indicator. An integer N truncates the name body to N chars (for example,
+=#systemcrafters= becomes =#syst= with 5); =drop-vowels= strips vowels; and
+=syllable= keeps the first char of each CamelCase or delimiter segment
+(=#system-crafters= becomes =#sc=). =nil= shows the full
+=clatter:network/#channel= buffer name. Colliding names are extended until
+unique; query nicks and the server buffer are never shortened.
+
+When =clatter-track-switch-return-to-origin= is =t=, repeated
+=M-x clatter-track-switch= calls cycle through active buffers by priority, and
+the call that finds no remaining activity returns you to the buffer you started
+switching from.
 
 ** Notifications
 

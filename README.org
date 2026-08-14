@@ -202,6 +202,8 @@ Every optional extra enabled at once, as a starting point to trim down:
   (clatter-notify-rules '((:target "#emacs" :level mentions :schedule (9 . 22))
                           (:target "#bots"  :level none)))
   (clatter-compact-system-messages 'compact) ; terse joins/parts/quits
+  (clatter-group-messages-by-nick t)       ; show a nick once per burst
+  (clatter-track-shorten 4)                ; e.g. #systemcrafters -> #syst
   (clatter-timestamp-format "%H:%M:%S")
   :config
   (require 'gnutls)
