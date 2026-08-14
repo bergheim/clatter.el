@@ -234,6 +234,15 @@ have channels with very long nicknames."
   :type 'integer
   :group 'clatter)
 
+(defcustom clatter-nick-column-truncate nil
+  "When non-nil, truncate nicks longer than `clatter-nick-column-width'.
+By default a nick that surpasses the column width overflows and pushes
+its message text to the right, breaking alignment with surrounding
+lines.  Set this to t to clip the nick column at the configured width so
+alignment is preserved at the cost of an incomplete nick."
+  :type 'boolean
+  :group 'clatter)
+
 (defcustom clatter-max-line-length 400
   "Maximum length of a single IRC message (excluding protocol overhead)."
   :type 'integer

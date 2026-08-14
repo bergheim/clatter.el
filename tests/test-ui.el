@@ -2089,6 +2089,53 @@ previous message's text properties there used to raise
                              "alice")))))
       (remhash "testnet" clatter-connections))))
 
+;;; Nick-column truncation
+
+(ert-deftest clatter-nick-column-truncate-clips-long-nick ()
+  "When truncation is on, a nick longer than the column is clipped to the width."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-nick-column-truncate t)
+        (clatter-nick-column-width 10))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (clatter-insert-privmsg (current-buffer) "verylongnick" "hello" conn)
+          (let ((bol (clatter-test--find-line-bol (current-buffer) "hello")))
+            (should bol)
+            (let ((line (save-excursion
+                          (goto-char bol)
+                          (buffer-substring-no-properties
+                           bol (line-end-position)))))
+              ;; The nick is clipped to the ellipsis form, sized so its
+              ;; display width (counting `…' as two cells) equals the
+              ;; column width: the column gets no leading pad, so the
+              ;; closing `>' lines up with shorter nicks above/below it.
+              (should (string-match-p "\\`<verylo…> hello" line))
+              (should (= (clatter--nick-column-display-width "<verylo…>")
+                         clatter-nick-column-width)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-nick-column-truncate-off-overflows ()
+  "With truncation off (the default), a long nick overflows the column."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-nick-column-truncate nil)
+        (clatter-nick-column-width 10))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'newest-first conn
+          (clatter-insert-privmsg (current-buffer) "verylongnick" "hello" conn)
+          (let ((bol (clatter-test--find-line-bol (current-buffer) "hello")))
+            (should bol)
+            ;; The full nick is present and spills past the column width...
+            (should (string-match-p
+                     "<verylongnick>"
+                     (save-excursion
+                       (goto-char bol)
+                       (buffer-substring-no-properties
+                        bol (line-end-position)))))
+            ;; ...so the char at the column boundary is still part of the nick.
+            (should-not (= (char-after (+ bol clatter-nick-column-width))
+                           ?\s))))
+      (remhash "testnet" clatter-connections))))
+
 (provide 'test-ui)
 
 ;;; test-ui.el ends here

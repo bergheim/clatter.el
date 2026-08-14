@@ -389,16 +389,52 @@ POSITION defaults to point."
       (and (listp invisible)
            (memq 'clatter-fool invisible))))
 
+(defun clatter--nick-column-display-width (s)
+  "Return the display width in columns S occupies in the nick column.
+The ellipsis `…' (U+2026) is counted as 2 columns: many terminal fonts
+render it double-width even though Emacs's `char-width' reports 1.
+Padding by this width keeps a truncated nick's closing delimiter lined
+up with the nicks above and below it instead of shifted one column right.
+Other characters use their `char-width'."
+  (let ((w 0))
+    (dolist (c (string-to-list s))
+      (setq w (+ w (if (= c ?…) 2 (char-width c)))))
+    w))
+
+(defun clatter--truncate-nick-column (nick-str width)
+  "Truncate NICK-STR for the nick column, fitting within WIDTH display cols.
+A `<nick>' or `-nick-' form keeps its delimiters and signals the cut
+with an ellipsis (`…'), so a long nick becomes e.g. `<longnic…>'.  The
+body is trimmed so the result's display width (counting `…' as two
+cells, see `clatter--nick-column-display-width') is WIDTH, which makes
+the closing `>' line up with the delimiters of shorter nicks in fonts
+that render the ellipsis wide.  Any other shape is clipped to WIDTH
+display cols."
+  (save-match-data
+    (cond
+     ((and (>= width 5)
+           (string-match "\\`<\\(.+\\)>\\'" nick-str))
+      ;; `<' + body + `…' + `>' = 4 display cols + body; body = WIDTH - 4.
+      (concat "<" (substring (match-string 1 nick-str) 0 (- width 4)) "…>"))
+     ((and (>= width 5)
+           (string-match "\\`-\\(.+\\)-\\'" nick-str))
+      (concat "-" (substring (match-string 1 nick-str) 0 (- width 4)) "…-"))
+     (t (substring nick-str 0 (1- width))))))
+
 (defun clatter--format-nick-column (nick-str &optional face sender blank)
   "Right-align NICK-STR within `clatter-nick-column-width'.
 Apply FACE and set clatter-sender property to SENDER if provided.
 When BLANK is non-nil, return a column of spaces (no nick text, no
 face) that still carries the `clatter-sender' and
 `clatter-navigation-target' properties, so grouped lines keep their
-sender metadata for navigation and highlighting."
+sender metadata for navigation and highlighting.
+
+When `clatter-nick-column-truncate' is non-nil, NICK-STR longer than
+the column width is truncated to fit (preserving the `<...>' or
+`-...-' delimiters with an ellipsis), so a very long nick does not
+push its message text past the column and break alignment with
+neighbors."
   (let* ((width clatter-nick-column-width)
-         (nick-len (length nick-str))
-         (pad (max 0 (- width nick-len)))
          (nick-text (copy-sequence nick-str))
          (padded nil))
     (if blank
@@ -407,15 +443,19 @@ sender metadata for navigation and highlighting."
         (propertize (make-string width ?\s)
                     'clatter-navigation-target 'message
                     'clatter-sender sender)
-      (when face
-        (add-face-text-property 0 (length nick-text) face nil nick-text))
-      (add-text-properties 0 (length nick-text)
-                           '(clatter-navigation-target message)
-                           nick-text)
-      (setq padded (concat (make-string pad ?\s) nick-text))
-      (when sender
-        (setq padded (propertize padded 'clatter-sender sender)))
-      padded)))
+      (when (and clatter-nick-column-truncate
+                 (> (clatter--nick-column-display-width nick-text) width))
+        (setq nick-text (clatter--truncate-nick-column nick-text width)))
+      (let ((pad (max 0 (- width (clatter--nick-column-display-width nick-text)))))
+        (when face
+          (add-face-text-property 0 (length nick-text) face nil nick-text))
+        (add-text-properties 0 (length nick-text)
+                             '(clatter-navigation-target message)
+                             nick-text)
+        (setq padded (concat (make-string pad ?\s) nick-text))
+        (when sender
+          (setq padded (propertize padded 'clatter-sender sender)))
+        padded))))
 
 (defun clatter--format-system-prefix (prefix-str)
   "Right-align PREFIX-STR (e.g. \"***\") within the nick column."
