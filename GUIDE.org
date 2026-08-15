@@ -746,6 +746,11 @@ argument to refresh faces already in use).
 | =clatter-track-in-buffer-mode-line= | =nil=       | Also show crumbs in each clatter buffer        |
 | =clatter-track-switch-return-to-origin= | =t=    | =clatter-track-switch= returns to the start buffer when exhausted |
 
+If you place =clatter-track-mode-line-item= in a custom mode line (for
+example a =doom-modeline= segment), clatter still appends it to the global
+=mode-line-format=, but the indicator renders only once per window, so the
+crumbs are never duplicated.
+
 Mentions sort above DMs, which sort above plain activity.
 =M-x clatter-track-switch= jumps to the most urgent buffer and
 =M-x clatter-track-list= shows everything. Mode-line entries are clickable. With

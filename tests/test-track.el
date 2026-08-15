@@ -279,6 +279,45 @@
                 (should (null clatter-track--switch-origin)))
             (kill-buffer origin)))))))
 
+;; --- Mode-line item duplication ---
+
+(ert-deftest clatter-track-mode-line-item-present-p-finds-nested-item ()
+  "A track item nested inside another construct counts as present."
+  (let ((format (list "%e" (list "" 'clatter-track-mode-line-item)
+                      'mode-line-end-spaces)))
+    (should (clatter-track--mode-line-item-present-p format))
+    (should-not (clatter-track--mode-line-item-present-p
+                 (list "%e" 'mode-line-end-spaces)))))
+
+(ert-deftest clatter-track-insert-mode-line-item-skips-nested-copy ()
+  "Inserting into a format that already nests the item changes nothing."
+  (let ((format (list "%e" (list "" 'clatter-track-mode-line-item)
+                      'mode-line-end-spaces)))
+    (should (equal (clatter-track--insert-mode-line-item format) format))))
+
+(ert-deftest clatter-track-mode-line-render-once-per-window ()
+  "The item renders once per window until the guard is cleared."
+  (let ((clatter-track--string " [#a]")
+        (clatter-track--rendered-window nil))
+    (should (equal (clatter-track--mode-line-render) " [#a]"))
+    (should (equal (clatter-track--mode-line-render) ""))
+    (clatter-track--allow-render)
+    (should (equal (clatter-track--mode-line-render) " [#a]"))))
+
+(ert-deftest clatter-track-mode-line-render-is-per-window ()
+  "The guard is per window, so a second window still shows the crumbs."
+  (let ((clatter-track--string " [#a]")
+        (clatter-track--rendered-window nil))
+    ;; Two occurrences in one window (say, one embedded by doom-modeline
+    ;; and one appended to the global format) render only the first.
+    (should (equal (clatter-track--mode-line-render) " [#a]"))
+    (should (equal (clatter-track--mode-line-render) ""))
+    (let ((other (split-window)))
+      (unwind-protect
+          (with-selected-window other
+            (should (equal (clatter-track--mode-line-render) " [#a]")))
+        (delete-window other)))))
+
 (provide 'test-track)
 
 ;;; test-track.el ends here
