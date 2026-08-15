@@ -150,6 +150,20 @@
             (should (equal (sort names #'string<) '("#sysl" "#syst")))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-track-shorten-tooltip-shows-full-name ()
+  "Hovering a shortened entry reveals the unabbreviated channel name."
+  (let ((clatter-track-shorten 3))
+    (unwind-protect
+        (let ((buf (clatter-get-or-create-buffer
+                    "net" "#systemcrafters" 'channel)))
+          (with-current-buffer buf (setq clatter--unread-count 2))
+          (let* ((info (car (clatter-track--collect)))
+                 (entry (clatter-track--format-entry info)))
+            (should (equal (plist-get info :name) "#sys"))
+            (should (equal (get-text-property 0 'help-echo entry)
+                           "#systemcrafters - 2 unread"))))
+      (clatter-test-cleanup))))
+
 (provide 'test-track-styling)
 
 ;;; test-track-styling.el ends here

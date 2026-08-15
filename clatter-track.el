@@ -282,7 +282,7 @@ unique or the full styled body is exhausted.  Mutates each channel info's
 
 (defun clatter-track--buffer-info (buf)
   "Return activity info for BUF as plist, or nil if no activity.
-Plist keys: :buffer :name :unread :mention :muted :dm"
+Plist keys: :buffer :name :full-name :unread :mention :muted :dm"
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (when (and (derived-mode-p 'clatter-mode)
@@ -297,6 +297,9 @@ Plist keys: :buffer :name :unread :mention :muted :dm"
                                (buffer-name buf))))
           (list :buffer buf
                 :name display-name
+                ;; Keep the unabbreviated target so tooltips can show the full
+                ;; channel name even when `clatter-track-shorten' truncates it.
+                :full-name target
                 :unread clatter--unread-count
                 :mention clatter--has-mention
                 :muted is-muted
@@ -388,6 +391,7 @@ Returns list of plists sorted by priority: mentions > DMs > activity."
 (defun clatter-track--format-entry (info)
   "Format a single track INFO plist into a propertized string."
   (let* ((name (plist-get info :name))
+         (full-name (or (plist-get info :full-name) name))
          (unread (plist-get info :unread))
          (mention (plist-get info :mention))
          (muted (plist-get info :muted))
@@ -398,7 +402,7 @@ Returns list of plists sorted by priority: mentions > DMs > activity."
     (propertize (format "%s%s%s" prefix name count-str)
                 'face face
                 'help-echo (format "%s - %d unread%s"
-                                   name unread
+                                   full-name unread
                                    (if mention " (mentioned)" ""))
                 'mouse-face 'highlight
                 'local-map (clatter-track--make-click-map (plist-get info :buffer)))))
@@ -564,6 +568,7 @@ name."
     (dolist (info infos)
       (let* ((buf (plist-get info :buffer))
              (name (or (plist-get info :name) ""))
+             (full-name (or (plist-get info :full-name) name))
              (unread (plist-get info :unread))
              (mention (plist-get info :mention))
              (dm (plist-get info :dm))
@@ -583,7 +588,7 @@ name."
                                         'mouse-face 'highlight
                                         'help-echo
                                         (format "%s - %d unread%s"
-                                                name unread
+                                                full-name unread
                                                 (if mention " (mentioned)" ""))
                                         'action
                                         #'clatter-activity--button-action))

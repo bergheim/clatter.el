@@ -757,7 +757,9 @@ indicator. An integer N truncates the name body to N chars (for example,
 =syllable= keeps the first char of each CamelCase or delimiter segment
 (=#system-crafters= becomes =#sc=). =nil= shows the full
 =clatter:network/#channel= buffer name. Colliding names are extended until
-unique; query nicks and the server buffer are never shortened.
+unique; query nicks and the server buffer are never shortened.  Hovering an
+entry (in the mode line or =*clatter-activity*=) shows a tooltip with the full,
+unshortened channel name and its unread count.
 
 When =clatter-track-switch-return-to-origin= is =t=, repeated
 =M-x clatter-track-switch= calls cycle through active buffers by priority, and
