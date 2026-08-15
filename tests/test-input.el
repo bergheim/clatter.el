@@ -615,6 +615,36 @@ be mistaken for an explicit channel argument."
     (clatter-cmd-ison "a b")
     (should (equal (clatter-test-last-sent) "ISON a b"))))
 
+(ert-deftest clatter-backward-kill-word-stops-at-input-origin ()
+  "\\[clatter-backward-kill-word] never kills or moves past the prompt."
+  (dolist (order '(oldest-first newest-first))
+    (clatter-input-test--with order
+      (goto-char clatter--input-marker)
+      (insert "hello world")
+      (clatter-backward-kill-word 1)
+      (should (equal (clatter--get-input) "hello "))
+      (clatter-backward-kill-word 1)
+      (should (equal (clatter--get-input) ""))
+      (should (= (point) (marker-position clatter--input-marker)))
+      ;; At the origin there is nothing left to kill: point must stay put.
+      (clatter-backward-kill-word 1)
+      (should (= (point) (marker-position clatter--input-marker)))
+      (should (equal (clatter--get-input) "")))))
+
+(ert-deftest clatter-kill-word-stops-at-input-end ()
+  "\\[clatter-kill-word] never kills or moves past the end of the input."
+  (dolist (order '(oldest-first newest-first))
+    (clatter-input-test--with order
+      (goto-char clatter--input-marker)
+      (insert "foo bar")
+      (goto-char (clatter--input-end))
+      (clatter-kill-word 1)
+      (should (equal (clatter--get-input) "foo bar"))
+      (should (= (point) (clatter--input-end)))
+      (goto-char clatter--input-marker)
+      (clatter-kill-word 1)
+      (should (equal (clatter--get-input) " bar")))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here

@@ -504,19 +504,21 @@ commands. The bindings below are local to clatter's own buffers.
 
 ** Chat buffers (clatter-mode-map)
 
-| Key         | Command                    | Description                        |
-|-------------+----------------------------+------------------------------------|
-| =RET=         | =clatter-send-input=         | Send the current input line        |
-| =TAB=         | =clatter-tab=                | Complete at point, or move forward |
-| =S-TAB=       | =clatter-backtab=            | Move to the previous item          |
-| =M-p=         | =clatter-set-prev-input=     | Older entry from the input history |
-| =M-n=         | =clatter-set-next-input=     | Newer entry from the input history |
-| =C-a=, =Home=   | =clatter-bol=                | Beginning of line                  |
-| =C-c C-a=     | =clatter-action-menu=        | Open the message action menu       |
-| =C-c C-r=     | =clatter-action-reply=       | Reply to the message at point      |
-| =C-c C-e=     | =clatter-action-react=       | React to the message at point      |
-| =C-c C-u=     | =clatter-action-collect-urls= | List every URL in the buffer       |
-| =C-c C-w=     | =clatter-action-whois=       | WHOIS the sender at point          |
+| Key                      | Command                       | Description                                    |
+|--------------------------+-------------------------------+------------------------------------------------|
+| =RET=                    | =clatter-send-input=          | Send the current input line                    |
+| =TAB=                    | =clatter-tab=                 | Complete at point, or move forward             |
+| =S-TAB=                  | =clatter-backtab=             | Move to the previous item                      |
+| =M-p=                    | =clatter-set-prev-input=      | Older entry from the input history             |
+| =M-n=                    | =clatter-set-next-input=      | Newer entry from the input history             |
+| =C-a=, =Home=            | =clatter-bol=                 | Beginning of line                              |
+| =M-DEL=, =C-<backspace>= | =clatter-backward-kill-word=  | Kill a word back, stopping at the prompt       |
+| =M-d=                    | =clatter-kill-word=           | Kill a word forward, stopping at the input end |
+| =C-c C-a=                | =clatter-action-menu=         | Open the message action menu                   |
+| =C-c C-r=                | =clatter-action-reply=        | Reply to the message at point                  |
+| =C-c C-e=                | =clatter-action-react=        | React to the message at point                  |
+| =C-c C-u=                | =clatter-action-collect-urls= | List every URL in the buffer                   |
+| =C-c C-w=                | =clatter-action-whois=        | WHOIS the sender at point                      |
 
 =clatter-next-item= and =clatter-previous-item= are unbound by default; bind them
 if you want to step between messages.

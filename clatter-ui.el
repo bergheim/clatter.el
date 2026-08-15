@@ -1652,6 +1652,37 @@ If the input contains multiple lines and exceeds
        (equal (point-marker) clatter--prompt-marker)
        (goto-char clatter--input-marker)))
 
+(defun clatter--clamp-to-input (position)
+  "Clamp POSITION to the bounds of the input area."
+  (max (marker-position clatter--input-marker)
+       (min position (clatter--input-end))))
+
+(defun clatter-backward-kill-word (&optional arg)
+  "Kill ARG words backward without crossing the start of the input area.
+Point stops at the input origin instead of drifting into the message
+area, matching what the read-only prompt does for a plain
+\\[delete-backward-char].  A negative ARG kills forward, stopping at the
+end of the input.  Outside the input area this is `backward-kill-word'."
+  (interactive "p")
+  (let ((arg (or arg 1)))
+    (if (clatter-in-input-p)
+        (let* ((from (point))
+               (to (clatter--clamp-to-input
+                    (save-excursion
+                      (ignore-errors (backward-word arg))
+                      (point)))))
+          (unless (= from to)
+            (kill-region to from)))
+      (backward-kill-word arg))))
+
+(defun clatter-kill-word (&optional arg)
+  "Kill ARG words forward without crossing the end of the input area.
+Outside the input area this is `kill-word'."
+  (interactive "p")
+  (if (clatter-in-input-p)
+      (clatter-backward-kill-word (- (or arg 1)))
+    (kill-word (or arg 1))))
+
 ;; Forward declaration
 (declare-function clatter-execute-command "clatter-commands")
 
@@ -2832,6 +2863,9 @@ Requires the server to support the message-tags capability."
   (define-key clatter-mode-map (kbd "M-p") #'clatter-set-prev-input)
   (define-key clatter-mode-map (kbd "M-n") #'clatter-set-next-input)
   (define-key clatter-mode-map (kbd "C-a") #'clatter-bol)
+  (define-key clatter-mode-map (kbd "M-DEL") #'clatter-backward-kill-word)
+  (define-key clatter-mode-map (kbd "<C-backspace>") #'clatter-backward-kill-word)
+  (define-key clatter-mode-map (kbd "M-d") #'clatter-kill-word)
   (define-key clatter-mode-map [home] #'clatter-bol))
 
 ;; Auto-init when loaded
