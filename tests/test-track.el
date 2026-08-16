@@ -295,28 +295,47 @@
                       'mode-line-end-spaces)))
     (should (equal (clatter-track--insert-mode-line-item format) format))))
 
-(ert-deftest clatter-track-mode-line-render-once-per-window ()
-  "The item renders once per window until the guard is cleared."
-  (let ((clatter-track--string " [#a]")
-        (clatter-track--rendered-window nil))
-    (should (equal (clatter-track--mode-line-render) " [#a]"))
-    (should (equal (clatter-track--mode-line-render) ""))
-    (clatter-track--allow-render)
-    (should (equal (clatter-track--mode-line-render) " [#a]"))))
+(ert-deftest clatter-track-sync-global-mode-line-respects-opt-out ()
+  "With the global option off, the item is never appended to the default."
+  (let ((clatter-track-global-mode-line nil)
+        (mode-line-format (default-value 'mode-line-format)))
+    (unwind-protect
+        (progn
+          (set-default 'mode-line-format (list "%e" 'mode-line-end-spaces))
+          (clatter-track--sync-global-mode-line)
+          (should-not (clatter-track--mode-line-item-present-p
+                       (default-value 'mode-line-format))))
+      (set-default 'mode-line-format mode-line-format))))
 
-(ert-deftest clatter-track-mode-line-render-is-per-window ()
-  "The guard is per window, so a second window still shows the crumbs."
-  (let ((clatter-track--string " [#a]")
-        (clatter-track--rendered-window nil))
-    ;; Two occurrences in one window (say, one embedded by doom-modeline
-    ;; and one appended to the global format) render only the first.
-    (should (equal (clatter-track--mode-line-render) " [#a]"))
-    (should (equal (clatter-track--mode-line-render) ""))
-    (let ((other (split-window)))
-      (unwind-protect
-          (with-selected-window other
-            (should (equal (clatter-track--mode-line-render) " [#a]")))
-        (delete-window other)))))
+(ert-deftest clatter-track-sync-global-mode-line-appends-when-on ()
+  "With the global option on, the item is appended once and idempotently."
+  (let ((clatter-track-global-mode-line t)
+        (mode-line-format (default-value 'mode-line-format)))
+    (unwind-protect
+        (progn
+          (set-default 'mode-line-format (list "%e" 'mode-line-end-spaces))
+          (clatter-track--sync-global-mode-line)
+          (should (clatter-track--mode-line-item-present-p
+                   (default-value 'mode-line-format)))
+          ;; A second sync does not duplicate the item.
+          (clatter-track--sync-global-mode-line)
+          (should (equal (member 'clatter-track-mode-line-item
+                                 (default-value 'mode-line-format))
+                         '(clatter-track-mode-line-item))))
+      (set-default 'mode-line-format mode-line-format))))
+
+(ert-deftest clatter-track-sync-global-mode-line-removes-when-toggled-off ()
+  "Toggling the option off strips a previously appended item from the default."
+  (let ((mode-line-format (default-value 'mode-line-format)))
+    (unwind-protect
+        (progn
+          (set-default 'mode-line-format (list "%e" 'clatter-track-mode-line-item
+                                               'mode-line-end-spaces))
+          (let ((clatter-track-global-mode-line nil))
+            (clatter-track--sync-global-mode-line))
+          (should-not (clatter-track--mode-line-item-present-p
+                       (default-value 'mode-line-format))))
+      (set-default 'mode-line-format mode-line-format))))
 
 (provide 'test-track)
 

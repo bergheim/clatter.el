@@ -125,6 +125,25 @@ the count.  `clatter-track-show-counts' remains the master switch."
                  (const :tag "No count" none))
   :group 'clatter)
 
+(defcustom clatter-track-global-mode-line t
+  "Install the activity indicator into the global `mode-line-format'.
+When non-nil (the default), `clatter-track-mode' appends
+`clatter-track-mode-line-item' to the default `mode-line-format' so the
+crumbs are visible in every window.
+
+Set this to nil when you embed `clatter-track-mode-line-item' in a
+custom mode line of your own (for example a `doom-modeline' segment).
+clatter then leaves the global `mode-line-format' untouched, avoiding a
+duplicate indicator.  You are responsible for adding the item to your
+modeline yourself.  Setting this through Customize or `setopt' adds or
+removes the item from the global format immediately."
+  :type 'boolean
+  :group 'clatter
+  :set (lambda (sym val)
+         (set-default sym val)
+         (when (fboundp 'clatter-track--sync-global-mode-line)
+           (clatter-track--sync-global-mode-line))))
+
 (defcustom clatter-track-in-buffer-mode-line nil
   "Show the activity crumbs in each clatter buffer's own mode line.
 By default the track indicator is appended to the global
@@ -429,30 +448,12 @@ Returns list of plists sorted by priority: mentions > DMs > activity."
 
 ;; --- Mode-line integration ---
 
-(defvar clatter-track--rendered-window nil
-  "Window whose mode line already rendered the track item.
-Reset before each redisplay so the item renders once per window.")
-
-(defun clatter-track--mode-line-render ()
-  "Return the track indicator, or \"\" when it already rendered here.
-The item can end up in a mode line more than once: a modeline package
-such as doom-modeline may embed it in its own format while clatter also
-appends it to the global `mode-line-format'.  Such nesting is invisible
-to a structural check, so only the first evaluation during a window's
-redisplay produces output."
-  (let ((window (selected-window)))
-    (if (eq clatter-track--rendered-window window)
-        ""
-      (setq clatter-track--rendered-window window)
-      clatter-track--string)))
-
-(defun clatter-track--allow-render (&rest _)
-  "Let the track item render again in the next mode line build."
-  (setq clatter-track--rendered-window nil))
-
 (defvar clatter-track-mode-line-item
-  '(:eval (clatter-track--mode-line-render))
-  "Mode-line construct showing clatter activity.")
+  '(:eval clatter-track--string)
+  "Mode-line construct showing clatter activity.
+Add this to a custom mode line (for example a `doom-modeline' segment)
+and set `clatter-track-global-mode-line' to nil so clatter does not
+also append it to the global `mode-line-format'.")
 
 (put 'clatter-track-mode-line-item 'risky-local-variable t)
 
@@ -461,7 +462,8 @@ redisplay produces output."
 The search descends into nested constructs, so an item another package
 embedded inside its own format still counts as present.  Items produced
 by a function call inside an `:eval' form cannot be found this way;
-those duplicates are suppressed at render time instead."
+users who embed the item that way should set
+`clatter-track-global-mode-line' to nil to avoid a duplicate."
   (cond
    ((eq format 'clatter-track-mode-line-item) t)
    ((consp format)
@@ -480,6 +482,21 @@ If the item is already present, FORMAT is returned unchanged."
                   tail)
         (append format (list 'clatter-track-mode-line-item))))))
 
+(defun clatter-track--sync-global-mode-line ()
+  "Add or remove the track item from the global `mode-line-format'.
+Adds the item when `clatter-track-global-mode-line' is non-nil and it is
+not already present; removes it when the option is nil.  Used both when
+`clatter-track-mode' is enabled and when the option is changed live."
+  (let ((fmt (default-value 'mode-line-format)))
+    (set-default 'mode-line-format
+                 (if clatter-track-global-mode-line
+                     (if (clatter-track--mode-line-item-present-p fmt)
+                         fmt
+                       (append fmt (list 'clatter-track-mode-line-item)))
+                   (delq 'clatter-track-mode-line-item
+                         (copy-sequence fmt)))))
+  (force-mode-line-update t))
+
 (defun clatter-track--refresh-mode-lines ()
   "Add or remove the track item in all clatter buffers' mode lines.
 The presence of the item follows `clatter-track-in-buffer-mode-line'."
@@ -496,9 +513,6 @@ The presence of the item follows `clatter-track-in-buffer-mode-line'."
 (defun clatter-track--update ()
   "Update the track string and force mode-line refresh."
   (let ((new-string (clatter-track--format-string)))
-    ;; Timers never run inside redisplay, so clearing the guard here is a
-    ;; safe recovery path if `pre-redisplay-functions' ever misses a cycle.
-    (clatter-track--allow-render)
     (unless (string= new-string clatter-track--string)
       (setq clatter-track--string new-string)
       (force-mode-line-update t))))
@@ -818,19 +832,13 @@ Renders the activity summary as a tabulated list; revert it with `g'
 (defun clatter-track-enable ()
   "Enable the activity tracker."
   (interactive)
-  ;; Install mode-line item
-  (unless (clatter-track--mode-line-item-present-p
-           (default-value 'mode-line-format))
-    (let ((fmt (default-value 'mode-line-format)))
-      (set-default 'mode-line-format
-                   (append fmt (list 'clatter-track-mode-line-item)))))
+  ;; Install mode-line item (honors `clatter-track-global-mode-line')
+  (clatter-track--sync-global-mode-line)
   ;; Start update timer
   (when clatter-track--timer
     (cancel-timer clatter-track--timer))
   (setq clatter-track--timer
         (run-with-timer 1 2 #'clatter-track--update))
-  ;; Render the item once per window, however often it appears
-  (add-hook 'pre-redisplay-functions #'clatter-track--allow-render)
   ;; Hook into buffer switches
   (add-hook 'window-buffer-change-functions #'clatter-track--window-change)
   (add-hook 'window-selection-change-functions
@@ -853,8 +861,6 @@ Renders the activity summary as a tabulated list; revert it with `g'
   (when clatter-track--timer
     (cancel-timer clatter-track--timer)
     (setq clatter-track--timer nil))
-  (remove-hook 'pre-redisplay-functions #'clatter-track--allow-render)
-  (clatter-track--allow-render)
   (remove-hook 'window-buffer-change-functions #'clatter-track--window-change)
   (remove-hook 'window-selection-change-functions
                #'clatter-track--selection-change)

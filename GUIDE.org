@@ -746,12 +746,14 @@ argument to refresh faces already in use).
 | =clatter-track-indicators=       | =@= / =*= / (none) | Prefix glyph for mention / DM / activity       |
 | =clatter-track-faces-alist=      | (4 faces)      | Face per activity type                         |
 | =clatter-track-in-buffer-mode-line= | =nil=       | Also show crumbs in each clatter buffer        |
+| =clatter-track-global-mode-line= | =t=          | Append crumbs to the global mode line (set =nil= with a custom modeline) |
 | =clatter-track-switch-return-to-origin= | =t=    | =clatter-track-switch= returns to the start buffer when exhausted |
 
-If you place =clatter-track-mode-line-item= in a custom mode line (for
-example a =doom-modeline= segment), clatter still appends it to the global
-=mode-line-format=, but the indicator renders only once per window, so the
-crumbs are never duplicated.
+To embed the indicator in a custom mode line (for example a
+=doom-modeline= segment), set =clatter-track-global-mode-line= to =nil= so
+clatter leaves the global =mode-line-format= untouched, then add
+=clatter-track-mode-line-item= to your modeline yourself. Otherwise clatter
+also appends the item to the global format and the crumbs appear twice.
 
 Mentions sort above DMs, which sort above plain activity.
 =M-x clatter-track-switch= jumps to the most urgent buffer and
