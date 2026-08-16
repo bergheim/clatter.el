@@ -147,6 +147,23 @@
           (should-not (string-match-p "#alpha" (buffer-string)))
           (should (string-match-p "#beta" (buffer-string))))))))
 
+(ert-deftest clatter-activity-list-ignores-shorten-config ()
+  "`*clatter-activity*' shows full buffer names regardless of `clatter-track-shorten'.
+The compact mode-line indicator honors shortening; the activity list does not,
+so a small `clatter-track-shorten' value must not truncate the Buffer column."
+  (let ((clatter-track-shorten 3)
+        (clatter-track-exclude-targets nil))
+    (clatter-activity-test--cleanup
+      (let ((chan (clatter-get-or-create-buffer "full" "#longchannel" 'channel)))
+        (with-current-buffer chan (setq clatter--unread-count 1))
+        (clatter-track-list)
+        (with-current-buffer (get-buffer "*clatter-activity*")
+          (let ((contents (buffer-string)))
+            ;; Full buffer name (clatter:full/#longchannel) is shown...
+            (should (string-match-p "#longchannel" contents))
+            ;; ...and the 3-char truncation that the mode-line would apply is not.
+            (should-not (string-match-p "#lon\\b" contents))))))))
+
 (ert-deftest clatter-activity-jump-switches-to-buffer-and-clears ()
   "`clatter-activity-jump' selects the entry's clatter buffer and clears it."
   (let ((clatter-track-shorten 100)

@@ -617,7 +617,10 @@ name."
         entries)
     (dolist (info infos)
       (let* ((buf (plist-get info :buffer))
-             (name (or (plist-get info :name) ""))
+             ;; The activity list always shows the full buffer name
+             ;; (clatter:network/#channel), ignoring `clatter-track-shorten';
+             ;; shortening only applies to the compact mode-line indicator.
+             (name (buffer-name buf))
              (full-name (or (plist-get info :full-name) name))
              (unread (plist-get info :unread))
              (mention (plist-get info :mention))
