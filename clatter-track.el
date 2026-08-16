@@ -70,7 +70,7 @@ or (\"#spam\" \"#bots\") to omit selected channels."
   :type '(alist :key-type symbol :value-type face)
   :group 'clatter)
 
-(defcustom clatter-track-shorten 5
+(defcustom clatter-track-shorten nil
   "Shorten channel names in the track indicator.
 nil shows the full buffer name, including the clatter:network/ prefix.
 An integer N truncates the channel name body to N chars; e.g. 5 turns

@@ -748,7 +748,7 @@ argument to refresh faces already in use).
 | =clatter-track-position=         | ='after-modes=  | Placement within the mode line                 |
 | =clatter-track-muted-channels=   | =nil=            | Targets dimmed but still tracked               |
 | =clatter-track-exclude-targets=  | =nil=            | Targets hidden from every tracker surface      |
-| =clatter-track-shorten=          | =5=              | =nil=, an integer N, =drop-vowels= or =syllable= channel shortening |
+| =clatter-track-shorten=          | =nil=            | =nil=, an integer N, =drop-vowels= or =syllable= channel shortening |
 | =clatter-track-show-counts=      | =t=              | Show unread counts                             |
 | =clatter-track-count-style=      | ='suffix=       | =suffix=, =superscript=, =subscript=, =glyph=, =none=    |
 | =clatter-track-indicators=       | =@= / =*= / (none) | Prefix glyph for mention / DM / activity       |
