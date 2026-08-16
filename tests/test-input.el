@@ -46,15 +46,21 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
 
 (defun clatter-input-test--last-line ()
   "Return the text of the buffer's last line."
-  (save-excursion
-    (goto-char (point-max))
-    (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+  ;; The prompt is its own text field, so ignore field boundaries here to
+  ;; read the whole physical line rather than just the input part of it.
+  (let ((inhibit-field-text-motion t))
+    (save-excursion
+      (goto-char (point-max))
+      (buffer-substring-no-properties (line-beginning-position)
+                                      (line-end-position)))))
 
 (defun clatter-input-test--first-line ()
   "Return the text of the buffer's first line."
-  (save-excursion
-    (goto-char (point-min))
-    (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+  (let ((inhibit-field-text-motion t))
+    (save-excursion
+      (goto-char (point-min))
+      (buffer-substring-no-properties (line-beginning-position)
+                                      (line-end-position)))))
 
 (defun clatter-input-test--prompt ()
   "Return the current prompt without text properties."
@@ -644,6 +650,57 @@ be mistaken for an explicit channel argument."
       (goto-char clatter--input-marker)
       (clatter-kill-word 1)
       (should (equal (clatter--get-input) " bar")))))
+
+(ert-deftest clatter-input-is-its-own-text-field ()
+  "The prompt is a separate field, so line motion stops at the input."
+  (dolist (order '(oldest-first newest-first))
+    (clatter-input-test--with order
+      (goto-char clatter--input-marker)
+      (insert "hello world")
+      (goto-char (- (point) 3))
+      (should (= (field-beginning) (marker-position clatter--input-marker)))
+      (should (= (field-end) (clatter--input-end)))
+      (should (= (line-beginning-position)
+                 (marker-position clatter--input-marker)))
+      (should (= (line-end-position) (clatter--input-end)))
+      (should (= (save-excursion (beginning-of-line) (point))
+                 (marker-position clatter--input-marker)))
+      (should (= (save-excursion (move-beginning-of-line nil) (point))
+                 (marker-position clatter--input-marker))))))
+
+(ert-deftest clatter-input-line-kill-never-touches-the-prompt ()
+  "Line-oriented kills bounded by the field leave the buffer structure intact.
+This is the shape third-party commands such as evil's `dd' use; before the
+input became its own field they expanded over the read-only prompt and
+signalled `text-read-only'."
+  (dolist (order '(oldest-first newest-first))
+    (clatter-input-test--with order
+      (let ((prompt (clatter-input-test--prompt))
+            (messages (marker-position clatter--messages-marker)))
+        (goto-char clatter--input-marker)
+        (insert "hello world")
+        (goto-char (- (point) 3))
+        ;; `evil-define-motion' narrows to the field before expanding a
+        ;; linewise range, so the range can never leave the input area.
+        (save-restriction
+          (narrow-to-region (field-beginning) (field-end))
+          (delete-region (line-beginning-position) (point-max)))
+        (should (equal (clatter--get-input) ""))
+        (should (equal (clatter-input-test--prompt) prompt))
+        (should (= (marker-position clatter--messages-marker) messages))
+        (should (= (point) (marker-position clatter--input-marker)))))))
+
+(ert-deftest clatter-input-kill-line-stops-at-input-end ()
+  "\\[kill-line] from the input origin clears the input and nothing else."
+  (dolist (order '(oldest-first newest-first))
+    (clatter-input-test--with order
+      (let ((messages (marker-position clatter--messages-marker)))
+        (goto-char clatter--input-marker)
+        (insert "hello world")
+        (goto-char clatter--input-marker)
+        (kill-line)
+        (should (equal (clatter--get-input) ""))
+        (should (= (marker-position clatter--messages-marker) messages))))))
 
 (provide 'test-input)
 

@@ -1440,6 +1440,12 @@ state."
     (propertize prompt
                 'face 'clatter-prompt
                 'read-only t
+                ;; A field boundary makes the line-motion primitives stop at
+                ;; the input origin, so third-party editing commands built on
+                ;; them (evil's `dd', `kill-whole-line', ...) cannot reach
+                ;; into the prompt and fail on its read-only text.
+                'field 'clatter-prompt
+                'inhibit-line-move-field-capture t
                 'front-sticky t
                 'rear-nonsticky t)))
 
@@ -1502,7 +1508,13 @@ conventional IRC client, with messages accumulating above it."
         ;; Newline separates input line from messages
         (save-excursion
           (goto-char clatter--input-marker)
-          (insert (propertize "\n" 'read-only t 'rear-nonsticky t))
+          (insert (propertize "\n"
+                              'read-only t
+                              ;; Close the input field so `field-end' and
+                              ;; friends stop before the separator newline.
+                              'field 'clatter-messages
+                              'inhibit-line-move-field-capture t
+                              'rear-nonsticky t))
           (setq clatter--messages-marker (point-marker))
           (set-marker-insertion-type clatter--messages-marker nil)))
       (goto-char clatter--input-marker)

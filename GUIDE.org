@@ -523,6 +523,11 @@ commands. The bindings below are local to clatter's own buffers.
 =clatter-next-item= and =clatter-previous-item= are unbound by default; bind them
 if you want to step between messages.
 
+The input area is a separate text field from the read-only prompt, so
+line-oriented editing commands from other packages stay inside it. evil's =dd=,
+=cc=, =C-u=, =kill-whole-line= and friends clear the input instead of failing on
+the prompt.
+
 ** Action menu (C-c C-a)
 
 The menu dispatches on a single key:
