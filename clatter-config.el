@@ -269,6 +269,29 @@ Reconnect manually with `clatter-connect' once the underlying problem is fixed."
                  (integer :tag "Max attempts"))
   :group 'clatter)
 
+(defcustom clatter-suspend-detect t
+  "Whether to detect system suspend/resume and re-establish connections.
+When non-nil, a lightweight periodic heartbeat infers that the system
+suspended (the wall clock jumped far ahead of the expected interval) and
+immediately tears down likely half-open sockets, resets the reconnect
+backoff, and reschedules a prompt reconnect, instead of waiting up to
+`clatter-ping-timeout' seconds for the health check to notice the dead
+link.  A connection that gave up reconnecting purely because it hit
+`clatter-reconnect-max-attempts' is given one more chance on resume;
+explicit disconnects, bans, and SASL refusals stay down."
+  :type 'boolean
+  :group 'clatter)
+
+(defcustom clatter-suspend-threshold 60
+  "Wall-clock gap in seconds above which a system resume is inferred.
+The heartbeat timer fires every `clatter-ping-interval' seconds; if the
+gap since the last fire exceeds this threshold, clatter assumes the
+machine was suspended and triggers resume handling.  Must exceed twice
+`clatter-ping-interval' to avoid false positives under load, so the
+default of 60 pairs safely with the default 30s ping interval."
+  :type 'integer
+  :group 'clatter)
+
 (defcustom clatter-ping-interval 30
   "Seconds between sending keepalive pings to the server.
 Matches ERC default.  Lower values keep the connection alive through

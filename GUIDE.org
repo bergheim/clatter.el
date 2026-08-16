@@ -612,8 +612,11 @@ leader does not conflict with typing messages.
 | =clatter-tls-external-command=    | ="gnutls-cli"=        | External TLS client, when =external=        |
 | =clatter-reconnect-initial-delay= | =10=                  | Seconds before the first reconnect        |
 | =clatter-reconnect-max-delay=     | =300=                 | Backoff ceiling                           |
+| =clatter-reconnect-max-attempts=  | =10=                  | Reconnects before giving up (=nil= never) |
 | =clatter-ping-interval=           | =30=                  | Seconds between health pings              |
 | =clatter-ping-timeout=            | =120=                 | Silence before declaring the link dead    |
+| =clatter-suspend-detect=          | =t=                   | Reconnect promptly after a system resume |
+| =clatter-suspend-threshold=      | =60=                  | Wall-clock gap (s) that implies a resume |
 | =clatter-quit-on-exit=            | =t=                   | QUIT all networks when Emacs exits        |
 | =clatter-quit-message=            | ="clatter.el"=        | Default QUIT message                      |
 | =clatter-max-line-length=         | =400=                 | Max outgoing payload before splitting     |
@@ -1079,6 +1082,17 @@ capabilities, =t= to toggle the parsed breakdown.
 - A SOCKS proxy plus =clatter-tls-method= set to =external= is a hard error.
   Proxies require builtin TLS.
 - Lower =clatter-reconnect-max-delay= for faster reconnects.
+- When the system suspends (laptop sleep), Emacs timers stop advancing and
+  the TCP link usually goes half-open. With =clatter-suspend-detect= on
+  (default), a periodic heartbeat notices the wall-clock gap on resume and
+  immediately tears down half-open sockets, resets the reconnect backoff, and
+  reschedules a prompt reconnect instead of waiting up to
+  =clatter-ping-timeout= seconds. A connection that gave up purely because it
+  hit =clatter-reconnect-max-attempts= (often suspend-induced) gets one more
+  chance on resume; explicit =/quit=, bans (465), and SASL refusals stay down.
+  Raise =clatter-suspend-threshold= if you see false resume detection under
+  heavy load. The mode-line shows =(connecting)=, =(reconnect Ns)=, or =(off)=
+  while a network is not fully connected.
 
 ** Connected but Not Identified
 

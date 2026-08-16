@@ -48,6 +48,8 @@
   reconnect-attempts   ; integer
   reconnect-timer      ; timer object
   reconnect-stable-timer ; timer that resets backoff after a stable connection
+  reconnect-disabled-reason ; nil :user :banned :sasl :max-attempts -- why reconnect was disabled
+  disconnect-reason    ; friendly reason string for the current disconnect, shown instead of the raw sentinel event
   regain-kill-count    ; integer: consecutive "regained by services" kills
   regain-kill-time     ; float-time of last regain kill, nil if none
   desired-nick         ; string: the configured nick we want to reclaim
@@ -159,6 +161,9 @@ to avoid blocking Emacs on a dead GnuTLS socket."
           (when (> since-recv clatter-ping-timeout)
             (clatter--watchdog "SEND-REFUSE %s (stale %.0fs, killing)"
                                (clatter-connection-network-id conn) since-recv)
+            (setf (clatter-connection-disconnect-reason conn)
+                  (format "No data from server for %.0fs (connection appears dead)"
+                          since-recv))
             (delete-process proc)
             (cl-return-from clatter-send nil)))
         (clatter--debug ">> %s" line)
@@ -172,6 +177,9 @@ to avoid blocking Emacs on a dead GnuTLS socket."
             (error
              (clatter--watchdog "SEND-FAIL %s %s"
                                 network-id (error-message-string err))
+             (setf (clatter-connection-disconnect-reason conn)
+                   (format "Connection write failed: %s"
+                           (error-message-string err)))
              (delete-process proc))))))))
 
 ;; --- Receive (Process Filter) ---
@@ -228,6 +236,29 @@ This is the main entry point from the process filter into the handler layer."
 
 ;; --- Process Sentinel (disconnect handling) ---
 
+(defun clatter--classify-disconnect-event (event)
+  "Translate a raw process-sentinel EVENT string into a human-readable cause.
+Emacs sentinel events are terse (\"connection broken by remote peer\",
+\"finished\", \"deleted process\"); this maps the known ones to clearer text
+and returns the trimmed event unchanged for anything unrecognized, so no
+information is lost."
+  (let ((e (string-trim event)))
+    (cond
+     ((string-match-p "broken by remote peer" e) "Connection closed by remote peer")
+     ((string-match-p "broken by peer" e) "Connection closed by peer")
+     ((string-equal e "finished") "Connection process exited")
+     ((string-equal e "deleted process") "Connection closed")
+     (t e))))
+
+(defun clatter--disconnect-message (conn event)
+  "Return a friendly disconnect message for CONN and sentinel EVENT.
+Prefers a reason set by the caller via the `disconnect-reason' slot (for
+internal disconnects such as health kills, connect aborts, and explicit
+disconnects) and clears that slot; otherwise classifies the raw EVENT."
+  (or (prog1 (clatter-connection-disconnect-reason conn)
+        (setf (clatter-connection-disconnect-reason conn) nil))
+      (clatter--classify-disconnect-event event)))
+
 (defun clatter--process-sentinel (proc event)
   "Process sentinel for PROC handling disconnect EVENT."
   (let* ((network-id (process-get proc :clatter-network-id))
@@ -237,41 +268,48 @@ This is the main entry point from the process filter into the handler layer."
     (when (and conn (eq proc (clatter-connection-process conn)))
       (clatter--debug "sentinel: %s %s" network-id (string-trim event))
       (clatter--watchdog "DISCONNECT %s event=%s" network-id (string-trim event))
-      (message "[clatter] Disconnected from %s: %s" network-id (string-trim event))
-      (setf (clatter-connection-state conn) :disconnected)
-      (setf (clatter-connection-process conn) nil)
-      ;; Release the dead process so it does not linger in
-      ;; `process-list' (M-x list-processes) after every disconnect.
-      ;; This sentinel only runs on terminal events, so PROC is already
-      ;; dead; `delete-process' is idempotent when other paths (the
-      ;; connect-abort/watchdog/health paths) already deleted it.
-      (delete-process proc)
-      ;; The external-TLS subprocess captures gnutls-cli/openssl stderr in
-      ;; a hidden buffer; kill it now that the subprocess is gone so failed
-      ;; connections don't leave one buffer per attempt.  Failure reasons are
-      ;; already preserved in the watchdog log.
-      (when-let* ((tls-buf (get-buffer (format " *clatter-tls-%s*" network-id))))
-        (kill-buffer tls-buf))
-      (clatter--cancel-reconnect-stable-timer conn)
-      ;; Cancel health timer
-      (when (clatter-connection-health-timer conn)
-        (cancel-timer (clatter-connection-health-timer conn))
-        (setf (clatter-connection-health-timer conn) nil))
-      ;; Cancel nick reclaim timer
-      (when (clatter-connection-nick-reclaim-timer conn)
-        (cancel-timer (clatter-connection-nick-reclaim-timer conn))
-        (setf (clatter-connection-nick-reclaim-timer conn) nil))
-      ;; Notify UI
-      (run-hook-with-args 'clatter-disconnect-hook network-id event)
-      ;; Auto-reconnect
-      (when (clatter-connection-reconnect-enabled conn)
-        (let ((attempts (clatter-connection-reconnect-attempts conn)))
-          (clatter--watchdog "RECONNECT-SCHEDULE %s attempt=%d delay=%ds"
-                             network-id (1+ attempts)
-                             (min (* clatter-reconnect-initial-delay
-                                     (expt 2 attempts))
-                                  clatter-reconnect-max-delay))
-          (clatter--schedule-reconnect conn))))))
+      ;; Compute the user-facing reason once: callers may have set a friendly
+      ;; `disconnect-reason' before deleting the process (health kills, connect
+      ;; aborts, explicit disconnects); otherwise classify the raw sentinel
+      ;; event.  `clatter--disconnect-message' clears the slot as a side effect
+      ;; so a later disconnect starts fresh; the local REASON binding carries
+      ;; the value to the UI hook below without re-polluting the slot.
+      (let ((reason (clatter--disconnect-message conn event)))
+        (message "[clatter] Disconnected from %s: %s" network-id reason)
+        (setf (clatter-connection-state conn) :disconnected)
+        (setf (clatter-connection-process conn) nil)
+        ;; Release the dead process so it does not linger in
+        ;; `process-list' (M-x list-processes) after every disconnect.
+        ;; This sentinel only runs on terminal events, so PROC is already
+        ;; dead; `delete-process' is idempotent when other paths (the
+        ;; connect-abort/watchdog/health paths) already deleted it.
+        (delete-process proc)
+        ;; The external-TLS subprocess captures gnutls-cli/openssl stderr in
+        ;; a hidden buffer; kill it now that the subprocess is gone so failed
+        ;; connections don't leave one buffer per attempt.  Failure reasons are
+        ;; already preserved in the watchdog log.
+        (when-let* ((tls-buf (get-buffer (format " *clatter-tls-%s*" network-id))))
+          (kill-buffer tls-buf))
+        (clatter--cancel-reconnect-stable-timer conn)
+        ;; Cancel health timer
+        (when (clatter-connection-health-timer conn)
+          (cancel-timer (clatter-connection-health-timer conn))
+          (setf (clatter-connection-health-timer conn) nil))
+        ;; Cancel nick reclaim timer
+        (when (clatter-connection-nick-reclaim-timer conn)
+          (cancel-timer (clatter-connection-nick-reclaim-timer conn))
+          (setf (clatter-connection-nick-reclaim-timer conn) nil))
+        ;; Notify UI with the friendly reason.
+        (run-hook-with-args 'clatter-disconnect-hook network-id reason)
+        ;; Auto-reconnect
+        (when (clatter-connection-reconnect-enabled conn)
+          (let ((attempts (clatter-connection-reconnect-attempts conn)))
+            (clatter--watchdog "RECONNECT-SCHEDULE %s attempt=%d delay=%ds"
+                               network-id (1+ attempts)
+                               (min (* clatter-reconnect-initial-delay
+                                       (expt 2 attempts))
+                                    clatter-reconnect-max-delay))
+            (clatter--schedule-reconnect conn)))))))
 
 ;; --- External TLS helper subprocess ---
 
@@ -342,14 +380,22 @@ Begins IRC registration once the subprocess is spawned."
                                 (not (eq (clatter-connection-state conn) :connected)))
                        (clatter--watchdog "EXT-WATCHDOG-KILL %s (not connected in 30s)"
                                           network-id)
+                       (setf (clatter-connection-disconnect-reason conn)
+                             "Connection attempt timed out (30s)")
                        (delete-process wp)))))
     conn))
 
 (defun clatter--connect-abort (proc reason)
   "Report REASON and delete in-progress PROC.
 Deleting PROC triggers its sentinel, which sets the disconnected state and
-schedules any reconnect, so callers must not duplicate that work here."
+schedules any reconnect, so callers must not duplicate that work here.
+REASON is also stashed on the connection as a friendly `disconnect-reason'
+so the sentinel surfaces it instead of the raw sentinel event."
   (message "[clatter] %s" reason)
+  (let* ((network-id (process-get proc :clatter-network-id))
+         (conn (and network-id (clatter-get-connection network-id))))
+    (when conn
+      (setf (clatter-connection-disconnect-reason conn) reason)))
   (when (process-live-p proc)
     (delete-process proc)))
 
@@ -436,6 +482,7 @@ ARGS are keyword arguments that override `clatter-networks' config:
           (let ((conn (clatter-get-connection network-id)))
             (when conn
               (setf (clatter-connection-reconnect-enabled conn) nil)
+              (setf (clatter-connection-reconnect-disabled-reason conn) :sasl)
               (clatter--cancel-reconnect-timer conn)
               (setf (clatter-connection-state conn) :disconnected)
               (run-hook-with-args 'clatter-system-hook conn
@@ -474,6 +521,11 @@ ARGS are keyword arguments that override `clatter-networks' config:
         (setf (clatter-connection-connect-overrides conn) args)
         (setf (clatter-connection-nick conn) nick)
         (setf (clatter-connection-desired-nick conn) nick)
+        ;; A fresh connect (manual or scheduled) re-enables auto-reconnect and
+        ;; clears any prior disable reason, so the give-up/revive bookkeeping
+        ;; starts from a clean slate.
+        (setf (clatter-connection-reconnect-enabled conn) t)
+        (setf (clatter-connection-reconnect-disabled-reason conn) nil)
         (setf (clatter-connection-recv-buffer conn) (decode-coding-string "" 'utf-8))
         (setf (clatter-connection-cap-negotiating conn) nil)
         (setf (clatter-connection-cap-enabled conn) nil)
@@ -539,6 +591,8 @@ ARGS are keyword arguments that override `clatter-networks' config:
                                (when (and (process-live-p watchdog-proc)
                                           (eq (clatter-connection-state conn) :connecting))
                                  (clatter--watchdog "WATCHDOG-KILL %s (stuck connecting)" network-id)
+                                 (setf (clatter-connection-disconnect-reason conn)
+                                       "Connection attempt timed out (15s)")
                                  (delete-process watchdog-proc)))))
               conn))
           (error
@@ -574,6 +628,7 @@ Always starts with CAP LS 302 for IRCv3 negotiation."
   (let ((conn (clatter-get-connection network-id)))
     (when conn
       (setf (clatter-connection-reconnect-enabled conn) nil)
+      (setf (clatter-connection-reconnect-disabled-reason conn) :user)
       (clatter--cancel-reconnect-timer conn)
       (clatter--cancel-reconnect-stable-timer conn)
       (when (clatter-connection-nick-reclaim-timer conn)
@@ -582,7 +637,12 @@ Always starts with CAP LS 302 for IRCv3 negotiation."
       (let ((proc (clatter-connection-process conn)))
         (when (and proc (process-live-p proc))
           (clatter-send conn (clatter-irc-quit (or message clatter-quit-message)))
-          ;; Give the QUIT time to send, then delete async
+          ;; Give the QUIT time to send, then delete async.  The sentinel will
+          ;; surface a friendly disconnect reason to the UI.
+          (setf (clatter-connection-disconnect-reason conn)
+                (if message
+                    (format "Disconnected (%s)" message)
+                  "Disconnected by user"))
           (run-at-time 0.5 nil
                        (lambda ()
                          (when (process-live-p proc)
@@ -598,6 +658,7 @@ each process so no orphaned ghost sessions remain on the servers."
     (maphash
      (lambda (_network-id conn)
        (setf (clatter-connection-reconnect-enabled conn) nil)
+       (setf (clatter-connection-reconnect-disabled-reason conn) :user)
        (clatter--cancel-reconnect-timer conn)
        (clatter--cancel-reconnect-stable-timer conn)
        (when (clatter-connection-nick-reclaim-timer conn)
@@ -648,6 +709,7 @@ avoid an immediate re-collision and another kill."
           ;; loop and tell the user how to recover.
           (progn
             (setf (clatter-connection-reconnect-enabled conn) nil)
+            (setf (clatter-connection-reconnect-disabled-reason conn) :max-attempts)
             (clatter--watchdog "RECONNECT-GIVEUP %s attempts=%d" network-id attempts)
             (message "[clatter] Giving up reconnecting to %s after %d attempts; run M-x clatter-connect once the problem is fixed"
                      network-id attempts)
@@ -733,6 +795,9 @@ PINGs are only sent when state is :connected (after 001)."
           (message "[clatter] No data from %s for %.0fs, killing connection"
                    network-id since-recv)
           (setf (clatter-connection-ping-sent-time conn) nil)
+          (setf (clatter-connection-disconnect-reason conn)
+                (format "No data from server for %.0fs (connection appears dead)"
+                        since-recv))
           (delete-process proc))
          ;; Send keepalive PING
          (t
@@ -740,6 +805,97 @@ PINGs are only sent when state is :connected (after 001)."
                              network-id since-recv)
           (setf (clatter-connection-ping-sent-time conn) (float-time))
           (clatter-send conn (clatter-irc-ping "clatter")))))))))
+
+;; --- Suspend / Resume detection ---
+
+;; A single periodic heartbeat infers a system suspend from a large gap in
+;; wall-clock time between fires.  Emacs timers do not advance while the
+;; machine is suspended, so on resume the next fire lands far behind schedule;
+;; that gap is the signal that the network is almost certainly half-open and
+;; the normal 120s health-check timeout would be far too slow.
+
+(defvar clatter--resume-timer nil
+  "Periodic heartbeat timer used to detect system suspend/resume.
+Nil when detection is off.")
+
+(defvar clatter--last-heartbeat 0
+  "Float-time of the last heartbeat fire, or 0 before the first one.")
+
+(defun clatter--resume-heartbeat ()
+  "Heartbeat callback: infer a suspend from a gap in wall-clock time.
+Compares the time since the last fire to `clatter-suspend-threshold' and,
+on a detected resume, triggers prompt reconnection for every connection."
+  (let ((now (float-time)))
+    ;; Skip the gap check on the very first fire (last-heartbeat is 0) so a
+    ;; freshly started detector does not mistake startup for a resume.
+    (when (and (> clatter--last-heartbeat 0)
+               (> (- now clatter--last-heartbeat) clatter-suspend-threshold))
+      (clatter--watchdog "RESUME gap=%.0fs threshold=%ds"
+                         (- now clatter--last-heartbeat) clatter-suspend-threshold)
+      (clatter--on-resume))
+    (setq clatter--last-heartbeat now)))
+
+(defun clatter--reschedule-after-resume (conn)
+  "Re-establish CONN promptly after a detected resume.
+A suspend is not a server-side persistent failure, so the reconnect
+backoff is reset.  Half-open (still \"live\") processes are killed so the
+sentinel reschedules with the reset backoff.  A pending backoff timer is
+replaced by a fresh schedule.  A connection that gave up purely because
+it hit `clatter-reconnect-max-attempts' (a transient failure, often
+suspend-induced) is given one more chance; explicit disconnects, bans,
+and SASL refusals are left down."
+  (let ((network-id (clatter-connection-network-id conn)))
+    ;; A suspend is transient: do not let it compound the backoff or the
+    ;; regain-kill bookkeeping from before the machine slept.
+    (setf (clatter-connection-reconnect-attempts conn) 0)
+    (setf (clatter-connection-regain-kill-count conn) 0)
+    (setf (clatter-connection-regain-kill-time conn) nil)
+    (let ((proc (clatter-connection-process conn)))
+      (cond
+       ;; A live process is almost certainly half-open after a suspend:
+       ;; tear it down; the sentinel reschedules with the reset backoff.
+       ((and proc (process-live-p proc)
+             (memq (process-status proc) '(open run)))
+        (setf (clatter-connection-disconnect-reason conn)
+              "Resuming after system suspend")
+        (clatter--watchdog "RESUME-KILL %s (half-open after suspend)" network-id)
+        (delete-process proc))
+       ;; Disconnected with a pending backoff timer: replace it with a
+       ;; prompt retry using the reset backoff.
+       ((clatter-connection-reconnect-timer conn)
+        (clatter--cancel-reconnect-timer conn)
+        (when (clatter-connection-reconnect-enabled conn)
+          (clatter--schedule-reconnect conn)))
+       ;; Disconnected, no pending timer, but auto-reconnect was given up
+       ;; purely as a transient max-attempts failure: revive it once.
+       ((and (not (clatter-connection-reconnect-enabled conn))
+             (eq (clatter-connection-reconnect-disabled-reason conn)
+                 :max-attempts))
+        (setf (clatter-connection-reconnect-enabled conn) t)
+        (setf (clatter-connection-reconnect-disabled-reason conn) nil)
+        (clatter--watchdog "RESUME-REVIVE %s (transient give-up)" network-id)
+        (clatter--schedule-reconnect conn))))))
+
+(defun clatter--on-resume ()
+  "Re-establish every connection after a detected system resume."
+  (maphash (lambda (_network-id conn)
+             (clatter--reschedule-after-resume conn))
+           clatter-connections))
+
+(defun clatter--start-resume-detector ()
+  "Start the suspend/resume heartbeat detector if not already running.
+The detector fires every `clatter-ping-interval' seconds."
+  (unless clatter--resume-timer
+    (setq clatter--last-heartbeat (float-time))
+    (setq clatter--resume-timer
+          (run-at-time clatter-ping-interval clatter-ping-interval
+                       #'clatter--resume-heartbeat))))
+
+(defun clatter--stop-resume-detector ()
+  "Stop the suspend/resume heartbeat detector if running."
+  (when clatter--resume-timer
+    (cancel-timer clatter--resume-timer)
+    (setq clatter--resume-timer nil)))
 
 ;; --- Hooks ---
 

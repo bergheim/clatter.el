@@ -149,6 +149,10 @@ Calling it more than once is harmless."
   ;; Cleanup handlers.
   (add-hook 'clatter-disconnect-hook #'clatter--on-disconnect)
   (add-hook 'kill-emacs-hook #'clatter--quit-on-exit)
+  ;; Suspend/resume detection: re-establish connections promptly after the
+  ;; machine wakes, instead of waiting up to `clatter-ping-timeout' seconds
+  ;; for the health check to notice a half-open link.
+  (when clatter-suspend-detect (clatter--start-resume-detector))
   ;; Optional features, each gated by its own user option.
   (when clatter-track-enabled (clatter-track-enable))
   (when clatter-notify-enabled (clatter-notify-enable))

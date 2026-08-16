@@ -348,6 +348,7 @@ Return the trimmed character."
       ;; --- Banned ---
       ("465"
        (setf (clatter-connection-reconnect-enabled conn) nil)
+       (setf (clatter-connection-reconnect-disabled-reason conn) :banned)
        (let ((reason (or (car (last params)) "No reason given")))
          (message "[clatter] BANNED from %s: %s (auto-reconnect disabled)"
                   (clatter-connection-network-id conn) reason)

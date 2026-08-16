@@ -842,6 +842,138 @@ Without this, every failed or retried clatter connection lingers in
           (should-not (clatter-test-sent-matching "NICK")))
       (clatter-test-cleanup))))
 
+;; --- Disconnect messages ---
+
+(ert-deftest clatter-test-classify-disconnect-event ()
+  "Known sentinel events are mapped to human-readable text; others pass through."
+  (should (equal (clatter--classify-disconnect-event
+                  "connection broken by remote peer\n")
+                 "Connection closed by remote peer"))
+  (should (equal (clatter--classify-disconnect-event "connection broken by peer\n")
+                 "Connection closed by peer"))
+  (should (equal (clatter--classify-disconnect-event "finished\n")
+                 "Connection process exited"))
+  (should (equal (clatter--classify-disconnect-event "deleted process\n")
+                 "Connection closed"))
+  ;; Unrecognized events fall through, trimmed but otherwise unchanged.
+  (should (equal (clatter--classify-disconnect-event "open\n") "open"))
+
+(ert-deftest clatter-test-disconnect-message-prefers-reason-slot ()
+  "`clatter--disconnect-message' prefers a caller-set reason and clears the slot."
+  (let ((conn (clatter-test-make-connection "n" "nick")))
+    (unwind-protect
+        (progn
+          (setf (clatter-connection-disconnect-reason conn) "Custom reason")
+          (should (equal (clatter--disconnect-message conn "finished\n")
+                         "Custom reason"))
+          ;; The slot is consumed, so the next call falls back to classification.
+          (should-not (clatter-connection-disconnect-reason conn))
+          (should (equal (clatter--disconnect-message conn "finished\n")
+                         "Connection process exited")))
+      (clatter-test-cleanup))))
+
+;; --- Reconnect disable reasons ---
+
+(ert-deftest clatter-test-explicit-disconnect-records-user-reason ()
+  "An explicit disconnect disables reconnect with a `:user' reason."
+  (let ((conn (clatter-test-make-connection "n" "nick")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'message) (lambda (&rest _))))
+          (clatter-disconnect "n")
+          (should-not (clatter-connection-reconnect-enabled conn))
+          (should (eq (clatter-connection-reconnect-disabled-reason conn) :user))
+          (should (eq (clatter-connection-state conn) :disconnected)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-dispatch-banned-records-banned-reason ()
+  "465 disables auto-reconnect with a `:banned' reason."
+  (let ((conn (clatter-test-make-connection "testnet" "testnick")))
+    (unwind-protect
+        (clatter-test-with-mock-send
+          (clatter-dispatch-message
+           conn (clatter-test-parse ":server 465 * :You are banned from this server"))
+          (should-not (clatter-connection-reconnect-enabled conn))
+          (should (eq (clatter-connection-reconnect-disabled-reason conn) :banned)))
+      (clatter-test-cleanup))))
+
+;; --- Suspend / resume re-establishment ---
+
+(ert-deftest clatter-test-resume-kills-half-open-and-resets-backoff ()
+  "On resume a live (half-open) process is killed and backoff is reset."
+  (let ((conn (clatter-test-make-connection "n" "nick"))
+        (proc (make-pipe-process :name "clatter-test-resume-live" :buffer nil)))
+    (setf (clatter-connection-process conn) proc)
+    (setf (clatter-connection-state conn) :connected)
+    (setf (clatter-connection-reconnect-attempts conn) 5)
+    (unwind-protect
+        (cl-letf (((symbol-function 'clatter--watchdog) (lambda (&rest _))))
+          (clatter--reschedule-after-resume conn)
+          (should-not (process-live-p proc))
+          (should (= (clatter-connection-reconnect-attempts conn) 0)))
+      (when (process-live-p proc) (delete-process proc))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-resume-replaces-pending-backoff ()
+  "On resume a pending backoff timer is replaced by a fresh schedule."
+  (let ((conn (clatter-test-make-connection "n" "nick"))
+        (scheduled nil))
+    (setf (clatter-connection-state conn) :disconnected)
+    (setf (clatter-connection-reconnect-attempts conn) 7)
+    (setf (clatter-connection-reconnect-timer conn) 'clatter-test-stale-timer)
+    (unwind-protect
+        (cl-letf (((symbol-function 'clatter--watchdog) (lambda (&rest _)))
+                  ((symbol-function 'cancel-timer) (lambda (_)))
+                  ((symbol-function 'message) (lambda (&rest _)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args)
+                     (setq scheduled (car (last args)))
+                     'clatter-test-timer)))
+          (clatter--reschedule-after-resume conn)
+          (should (eq (clatter-connection-reconnect-timer conn) 'clatter-test-timer))
+          (should (= (clatter-connection-reconnect-attempts conn) 1))
+          (should (functionp scheduled)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-resume-revives-transient-give-up ()
+  "A max-attempts give-up is revived on resume and rescheduled."
+  (let ((conn (clatter-test-make-connection "n" "nick"))
+        (scheduled nil))
+    (setf (clatter-connection-state conn) :disconnected)
+    (setf (clatter-connection-reconnect-enabled conn) nil)
+    (setf (clatter-connection-reconnect-disabled-reason conn) :max-attempts)
+    (setf (clatter-connection-reconnect-attempts conn) 10)
+    (unwind-protect
+        (cl-letf (((symbol-function 'clatter--watchdog) (lambda (&rest _)))
+                  ((symbol-function 'message) (lambda (&rest _)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest args)
+                     (setq scheduled (car (last args)))
+                     'clatter-test-timer)))
+          (clatter--reschedule-after-resume conn)
+          (should (clatter-connection-reconnect-enabled conn))
+          (should-not (clatter-connection-reconnect-disabled-reason conn))
+          (should (eq (clatter-connection-reconnect-timer conn) 'clatter-test-timer))
+          (should (functionp scheduled)))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-resume-does-not-revive-user-disconnect ()
+  "An explicit user disconnect is left down across a resume."
+  (let ((conn (clatter-test-make-connection "n" "nick"))
+        (scheduled nil))
+    (setf (clatter-connection-state conn) :disconnected)
+    (setf (clatter-connection-reconnect-enabled conn) nil)
+    (setf (clatter-connection-reconnect-disabled-reason conn) :user)
+    (unwind-protect
+        (cl-letf (((symbol-function 'clatter--watchdog) (lambda (&rest _)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest _) (setq scheduled t) 'clatter-test-timer)))
+                  ((symbol-function 'delete-process) (lambda (&rest _))))
+          (clatter--reschedule-after-resume conn)
+          (should-not (clatter-connection-reconnect-enabled conn))
+          (should (eq (clatter-connection-reconnect-disabled-reason conn) :user))
+          (should-not scheduled))
+      (clatter-test-cleanup))))
+
 (provide 'test-handlers)
 
 ;;; test-handlers.el ends here

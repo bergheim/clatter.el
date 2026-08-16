@@ -1762,6 +1762,30 @@ Fall back to the network and target when the buffer has no topic."
     ('context '(:eval (clatter--header-line-string)))
     (_ nil)))
 
+(defun clatter--mode-line-state-fragment (conn)
+  "Return a propertized connection-state fragment for CONN, or nil.
+Shown in the mode-line so a dead or reconnecting network is visible at a
+glance without running `clatter-status'.  Returns nil when CONN is fully
+connected (the common case) or absent."
+  (when conn
+    (let ((state (clatter-connection-state conn)))
+      (pcase state
+        (:connected nil)
+        (:connecting (propertize "(connecting)" 'face 'clatter-error))
+        (:registering (propertize "(connecting)" 'face 'clatter-error))
+        (:disconnected
+         (let ((timer (clatter-connection-reconnect-timer conn)))
+           (cond
+            ((and timer
+                  (clatter-connection-reconnect-enabled conn))
+             (let ((remaining (max 0 (round (- (float-time (timer--time timer))
+                                               (float-time))))))
+               (propertize (format "(reconnect %ds)" remaining)
+                           'face 'clatter-error)))
+            ((clatter-connection-reconnect-enabled conn)
+             (propertize "(reconnecting)" 'face 'clatter-error))
+            (t (propertize "(off)" 'face 'clatter-error)))))))))
+
 (defun clatter--mode-line-string ()
   "Generate mode-line string for current clatter buffer."
   (when clatter--network
@@ -1790,7 +1814,8 @@ Fall back to the network and target when the buffer has no topic."
                                 (or nick-str away-str))
                               (and show-nicks
                                    (> nicks 0)
-                                   (format "(%d)" nicks)))))
+                                   (format "(%d)" nicks))
+                              (clatter--mode-line-state-fragment conn))))
            (base (string-join parts " ")))
       (format " %s%s"
               base
