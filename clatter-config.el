@@ -565,8 +565,7 @@ types at runtime without losing any history."
     "draft/reply"
     "+draft/reply"
     "draft/react"
-    "+draft/react"
-    "message-tags")
+    "+draft/react")
   "IRCv3 capabilities to request during CAP negotiation.")
 
 ;; --- Ignore list ---
