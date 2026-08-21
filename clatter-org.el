@@ -97,40 +97,7 @@ For use as %(clatter-org-capture-channel)."
       (setq network (match-string 1 log-file))
       (setq channel (match-string 2 log-file)))
     (with-temp-buffer
-      (insert (format "#+TITLE: IRC Log - %s/%s\n"
-                      (or network "unknown") (or channel "unknown")))
-      (insert (format "#+DATE: %s\n" (format-time-string "%Y-%m-%d")))
-      (insert "#+STARTUP: showall\n\n")
-      (insert "* Messages\n\n")
-      (with-temp-buffer
-        (insert-file-contents log-file)
-        (goto-char (point-min))
-        (let ((current-date nil)
-              (lines nil))
-          (while (not (eobp))
-            (let ((line (buffer-substring-no-properties
-                         (line-beginning-position) (line-end-position))))
-              ;; Parse [timestamp] content
-              (when (string-match "\\`\\[\\([0-9-]+\\) \\([0-9:]+\\)\\] \\(.*\\)\\'" line)
-                (let ((date (match-string 1 line))
-                      (time (match-string 2 line))
-                      (content (match-string 3 line)))
-                  (push (list date time content) lines))))
-            (forward-line 1))
-          ;; Write in org format, grouped by date
-          (let ((output-buf (current-buffer)))
-            (dolist (entry (nreverse lines))
-              (let ((date (nth 0 entry))
-                    (_time (nth 1 entry))
-                    (_content (nth 2 entry)))
-                (with-current-buffer output-buf
-                  (when (not (equal date current-date))
-                    (setq current-date date)
-                    (goto-char (point-max))))
-                ;; Write to outer buffer
-                (with-temp-message ""
-                  nil))))))
-      ;; Actually write the export properly
+      ;; Actually write the export
       (erase-buffer)
       (insert (format "#+TITLE: IRC Log - %s/%s\n"
                       (or network "unknown") (or channel "unknown")))
