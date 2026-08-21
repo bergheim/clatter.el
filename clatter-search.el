@@ -214,10 +214,10 @@ With prefix arg, prompt for network to filter."
           (recenter))
       (message "No result at point"))))
 
-(defun clatter-search-visit-result-other-window ()
-  "Visit the log file at point in other window."
-  (interactive)
-  (clatter-search-visit-result))
+(defalias 'clatter-search-visit-result-other-window
+  #'clatter-search-visit-result
+  "Visit the log file at point in another window.
+`clatter-search-visit-result' already uses `find-file-other-window'.")
 
 (defun clatter-search-refresh ()
   "Re-run the current search."
