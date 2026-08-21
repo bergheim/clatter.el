@@ -6,30 +6,6 @@
 (require 'clatter-ui)
 (require 'clatter-url-preview)
 
-(ert-deftest clatter-url-preview-insert-stays-at-message-anchor ()
-  "An async title is inserted below its URL, not at the current buffer end."
-  (with-temp-buffer
-    (insert "<alice> https://example.com/one\n")
-    (let ((anchor (copy-marker (point))))
-      ;; Simulate messages arriving while curl fetches the title.  A nil
-      ;; insertion-type anchor remains before this later text.
-      (insert "<bob> later message\n")
-      (clatter-url-preview--insert "Example title" (current-buffer) anchor)
-      (should (equal (buffer-string)
-                     "<alice> https://example.com/one\n↳ Example title\n<bob> later message\n")))))
-
-(ert-deftest clatter-url-preview-insert-refreshes-input-spacer ()
-  "An asynchronously inserted title immediately refreshes input pinning."
-  (with-temp-buffer
-    (insert "<alice> https://example.com/one\n")
-    (let ((anchor (copy-marker (point)))
-          refreshed-buffer)
-      (cl-letf (((symbol-function 'clatter--refresh-input-spacers)
-                 (lambda (&optional buffer)
-                   (setq refreshed-buffer buffer))))
-        (clatter-url-preview--insert "Example title" (current-buffer) anchor))
-      (should (eq refreshed-buffer (current-buffer))))))
-
 (ert-deftest clatter-url-preview-hook-passes-message-anchor-to-fetch ()
   "The hook gives the fetcher an anchor after the just-inserted message."
   (let ((clatter-url-preview-enable t)

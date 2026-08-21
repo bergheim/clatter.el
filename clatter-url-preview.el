@@ -140,39 +140,24 @@ cache hit or asynchronous request detaches them."
 
 ANCHOR's tail marker is advanced after insertion, retaining cached URL order.
 No text is inserted if truncation or deletion has removed the source message."
-  (cond
-   ((clatter-url-preview--anchor-p anchor)
-    (when (and (eq buffer (clatter-url-preview--anchor-buffer anchor))
-               (clatter-url-preview--anchor-live-p anchor))
-      (with-current-buffer buffer
-        (let ((inhibit-read-only t)
-              (prefix (make-string (1+ clatter-nick-column-width) ?\s)))
-          (save-excursion
-            (goto-char (clatter-url-preview--anchor-tail anchor))
-            (insert (propertize (format "↳ %s\n" title)
-                                'face 'clatter-url-preview-title
-                                'read-only t
-                                'front-sticky t
-                                'line-prefix prefix
-                                'wrap-prefix prefix))
-            ;; A nil-insertion-type marker stays before unrelated messages,
-            ;; but must move past this preview to form a stable local tail.
-            (set-marker (clatter-url-preview--anchor-tail anchor) (point))))
-        (clatter--refresh-input-spacers buffer))))
-   ;; Compatibility for callers of the former low-level marker API.
-   ((and (buffer-live-p buffer) (markerp anchor) (marker-buffer anchor))
+  (when (and (clatter-url-preview--anchor-p anchor)
+             (eq buffer (clatter-url-preview--anchor-buffer anchor))
+             (clatter-url-preview--anchor-live-p anchor))
     (with-current-buffer buffer
       (let ((inhibit-read-only t)
             (prefix (make-string (1+ clatter-nick-column-width) ?\s)))
         (save-excursion
-          (goto-char anchor)
+          (goto-char (clatter-url-preview--anchor-tail anchor))
           (insert (propertize (format "↳ %s\n" title)
                               'face 'clatter-url-preview-title
                               'read-only t
                               'front-sticky t
                               'line-prefix prefix
-                              'wrap-prefix prefix))))
-      (clatter--refresh-input-spacers buffer)))))
+                              'wrap-prefix prefix))
+          ;; A nil-insertion-type marker stays before unrelated messages,
+          ;; but must move past this preview to form a stable local tail.
+          (set-marker (clatter-url-preview--anchor-tail anchor) (point))))
+      (clatter--refresh-input-spacers buffer))))
 
 (defun clatter-url-preview--fetch (url buffer anchor)
   "Asynchronously fetch URL and display its title in BUFFER at ANCHOR.
