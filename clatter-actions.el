@@ -239,34 +239,19 @@ With a prefix argument ARG, uses a /reply command."
          (sender (plist-get props :sender))
          (url (get-text-property (point) 'clatter-url))
          (choices (delq nil
-                        (list '(?r "reply")
-                              '(?e "react")
-                              '(?c "copy msg")
-                              (when sender `(?n ,(format "nick(\"%s\")" sender)))
-                              (when url '(?u "url copy"))
-                              (when url '(?o "open url"))
-                              (when sender '(?w "WHOIS"))
-                              (when sender '(?q "query"))
-                              '(?i "inspect")
-                              (when sender '(?I "Ignore"))
-                              '(?l "list urls"))))
-         (help-string
-          (string-join (delq nil
-                             (list "Key bindings:"
-                                   "  r  Reply (insert nick at prompt)"
-                                   "  e  React (insert /react at prompt)"
-                                   "  c  Copy message text"
-                                   (when sender (format "  n  Copy nick (\"%s\")" sender))
-                                   (when url "  u  Copy URL at point")
-                                   (when url "  o  Open URL at point")
-                                   (when sender "  w  WHOIS sender")
-                                   (when sender "  q  Open query/DM with sender")
-                                   "  i  Inspect raw message"
-                                   (when sender "  I  Toggle ignore on sender")
-                                   "  l  List all URLs in buffer"))
-                       "\n\n")))
+                        (list '(?r "reply" "Reply (insert nick at prompt)")
+                              '(?e "react" "React (insert /react at prompt)")
+                              '(?c "copy msg" "Copy message text")
+                              (when sender `(?n "nick" ,(format "Copy nick (\"%s\")" sender)))
+                              (when url '(?u "url copy" "Copy URL at point"))
+                              (when url '(?o "open url" "Open URL at point"))
+                              (when sender '(?w "WHOIS" "WHOIS sender"))
+                              (when sender '(?q "query" "Open query/DM with sender"))
+                              '(?i "inspect" "Inspect raw message")
+                              (when sender '(?I "Ignore" "Toggle ignore on sender"))
+                              '(?l "list urls" "List all URLs in buffer")))))
     (call-interactively
-     (pcase (car (read-multiple-choice "Pick: " choices help-string))
+     (pcase (car (read-multiple-choice "Pick: " choices))
        (?r #'clatter-action-reply)
        (?e #'clatter-action-react)
        (?c #'clatter-action-copy-message)
