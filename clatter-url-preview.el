@@ -22,10 +22,8 @@
 ;; --- Configuration ---
 
 (defface clatter-url-preview-title
-  '((t :inherit font-lock-builtin-face :slant italic))
-  "Face for the title line of a rendered link preview.
-Inherits from a standard theme face so it stays legible on light and
-dark themes."
+  '((t :inherit font-lock-doc-face :slant italic))
+  "Face for the title line of a rendered link preview."
   :group 'clatter)
 
 (defcustom clatter-url-preview-enable nil
