@@ -147,8 +147,12 @@ DIRECTION is :in or :out."
 
 ;; --- Hook into connection layer ---
 
-(defvar clatter-rawlog--original-send nil
-  "Storage for the original `clatter-send' function when wrapping.")
+;; These hooks should be called from clatter-connection.el
+(defvar clatter-rawlog-incoming-hook nil
+  "Hook called with (NETWORK LINE) for each incoming raw IRC line.")
+
+(defvar clatter-rawlog-outgoing-hook nil
+  "Hook called with (NETWORK LINE) for each outgoing raw IRC line.")
 
 (defun clatter-rawlog--on-incoming (network line)
   "Log incoming LINE from NETWORK."
@@ -157,13 +161,6 @@ DIRECTION is :in or :out."
 (defun clatter-rawlog--on-outgoing (network line)
   "Log outgoing LINE to NETWORK."
   (clatter-rawlog--insert network :out line))
-
-;; These hooks should be called from clatter-connection.el
-(defvar clatter-rawlog-incoming-hook nil
-  "Hook called with (NETWORK LINE) for each incoming raw IRC line.")
-
-(defvar clatter-rawlog-outgoing-hook nil
-  "Hook called with (NETWORK LINE) for each outgoing raw IRC line.")
 
 ;; --- Major mode ---
 
