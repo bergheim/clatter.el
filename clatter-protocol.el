@@ -322,11 +322,7 @@ Tags format: key1=value1;key2=value2;key3"
 
 (defun clatter-irc-format-tagged-privmsg (&optional tags-alist)
   "Format PRIVMSG tagged with TAGS-ALIST."
-   (clatter-format-tagged-command "PRIVMSG" tags-alist))
-
-(defun clatter-irc-format-tagged-notice (&optional tags-alist)
-  "Format NOTICE tagged with TAGS-ALIST."
-   (clatter-format-tagged-command "NOTICE" tags-alist))
+  (clatter-format-tagged-command "PRIVMSG" tags-alist))
 
 (defun clatter-get-parsed-server-time (tags-alist)
   "Extract server-time from IRCv3 TAGS-ALIST.
@@ -401,7 +397,7 @@ The last param is treated as trailing if it contains spaces."
 (defun clatter-irc-notice (target text &optional tags-alist)
   "Format NOTICE tagged with TAGS-ALIST to TARGET with TEXT."
   (clatter-format-line
-   (clatter-irc-format-tagged-notice tags-alist)
+   (clatter-format-tagged-command "NOTICE" tags-alist)
    target text))
 
 (defun clatter-irc-quit (&optional message)
