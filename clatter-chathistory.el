@@ -98,15 +98,6 @@ TIME is an Emacs time value."
                     (format "CHATHISTORY BEFORE %s timestamp=%s %d"
                             target ts n)))))
 
-(defun clatter-chathistory-fetch-after (conn target timestamp &optional limit)
-  "Fetch LIMIT messages after TIMESTAMP for TARGET via CONN."
-  (when (clatter-chathistory--available-p conn)
-    (let ((n (or limit clatter-chathistory-limit))
-          (ts (clatter-chathistory--format-time timestamp)))
-      (clatter-send conn
-                    (format "CHATHISTORY AFTER %s timestamp=%s %d"
-                            target ts n)))))
-
 (defun clatter-chathistory-fetch-since (conn target timestamp &optional limit)
   "Fetch messages since TIMESTAMP for TARGET via CONN.
 Used on reconnect to fill in gaps."
