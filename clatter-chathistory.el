@@ -59,6 +59,10 @@
   "Last known message timestamp for this buffer.
 Used to request messages since this time on reconnect.")
 
+(defvar-local clatter-chathistory--earliest-timestamp nil
+  "Earliest known message timestamp for this buffer.
+Used by `clatter-chathistory-more' to page further back.")
+
 ;; --- Capability check ---
 
 (defun clatter-chathistory--available-p (conn)
@@ -198,9 +202,13 @@ SENDER is who joined; we only fetch if it's our own nick."
 
 (defun clatter-chathistory--track-timestamp (_conn _sender _target _text server-time)
   "Track the latest message timestamp for chathistory gaps.
-SERVER-TIME is the IRCv3 server-time value."
+SERVER-TIME is the IRCv3 server-time value.  Also seed the earliest
+timestamp when unset, so `clatter-chathistory-more' has a cursor."
   (when server-time
-    (setq-local clatter-chathistory--last-timestamp server-time)))
+    (setq-local clatter-chathistory--last-timestamp server-time)
+    (when (or (null clatter-chathistory--earliest-timestamp)
+              (time-less-p server-time clatter-chathistory--earliest-timestamp))
+      (setq-local clatter-chathistory--earliest-timestamp server-time))))
 
 (defun clatter-chathistory--track-batch-timestamp (conn _batch-type target messages)
   "Track the newest timestamp in completed history MESSAGES for TARGET.
@@ -209,17 +217,25 @@ such as `soju.im/bouncer-networks' are ignored (they have no buffer to
 track a cursor for)."
   (when (stringp target)
     (let ((buf (clatter-get-buffer (clatter-connection-network-id conn) target))
-          latest)
+          latest earliest)
       (dolist (message messages)
         (let ((timestamp (plist-get message :time)))
           (when (and timestamp
                      (or (null latest) (time-less-p latest timestamp)))
-            (setq latest timestamp))))
+            (setq latest timestamp))
+          (when (and timestamp
+                     (or (null earliest) (time-less-p timestamp earliest)))
+            (setq earliest timestamp))))
       (when (and buf latest)
         (with-current-buffer buf
           (when (or (null clatter-chathistory--last-timestamp)
                     (time-less-p clatter-chathistory--last-timestamp latest))
-            (setq-local clatter-chathistory--last-timestamp latest)))))))
+            (setq-local clatter-chathistory--last-timestamp latest))))
+      (when (and buf earliest)
+        (with-current-buffer buf
+          (when (or (null clatter-chathistory--earliest-timestamp)
+                    (time-less-p earliest clatter-chathistory--earliest-timestamp))
+            (setq-local clatter-chathistory--earliest-timestamp earliest)))))))
 
 ;; --- Interactive commands ---
 
@@ -246,7 +262,7 @@ COUNT defaults to `clatter-chathistory-limit'."
         (n (or count clatter-chathistory-limit)))
     (if (and conn target)
         (if (clatter-chathistory--available-p conn)
-            (let ((earliest clatter-chathistory--last-timestamp))
+            (let ((earliest clatter-chathistory--earliest-timestamp))
               (if earliest
                   (progn
                     (clatter-chathistory-fetch-before conn target earliest n)

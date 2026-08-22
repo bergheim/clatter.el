@@ -24,6 +24,30 @@
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
+(ert-deftest clatter-chathistory-more-pages-before-earliest ()
+  "clatter-chathistory-more fetches BEFORE the earliest message, not latest."
+  (let ((conn (clatter-test-make-connection-with-caps
+               '("server-time" "batch" "message-tags" "chathistory")
+               "testnet" "testnick"))
+        buf)
+    (unwind-protect
+        (progn
+          (setq buf (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
+          (with-current-buffer buf
+            (setq-local clatter--network "testnet")
+            (setq-local clatter--target "#emacs")
+            (setq-local clatter-chathistory--last-timestamp
+                        (encode-time 0 0 12 1 1 2026 t))
+            (setq-local clatter-chathistory--earliest-timestamp
+                        (encode-time 0 0 10 1 1 2026 t))
+            (clatter-test-with-mock-send
+              (clatter-chathistory-more 10)
+              (should (clatter-test-sent-matching
+                       "^CHATHISTORY BEFORE #emacs timestamp=2026-01-01T10:00:00.000Z 10$")))))
+      (clatter-test-cleanup)
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
 (ert-deftest clatter-chathistory-batch-ignores-nil-target ()
   "A target-less batch (e.g. soju.im/bouncer-networks) is a no-op.
 It must not error on (downcase nil) and must not touch any buffer."
