@@ -98,6 +98,15 @@ the fan-out builds with a \"/network\" suffix) never re-list."
   :type 'boolean
   :group 'clatter)
 
+(defcustom clatter-sasl-allow-plaintext nil
+  "Allow SASL PLAIN over plaintext connections.
+SASL PLAIN transmits the password as base64, which is plain text for any
+eavesdropper; clatter therefore skips it unless the connection uses TLS.
+Set this non-nil only for trusted plaintext links (for example a local
+bouncer on the loopback interface)."
+  :type 'boolean
+  :group 'clatter)
+
 (defcustom clatter-proxy nil
   "Default SOCKS5 proxy for networks without a per-network `:proxy'.
 A plist of the form (:type socks5 :host HOST :port PORT [:user U] [:pass P]),

@@ -105,15 +105,27 @@ Dispatches based on subcommand (LS, ACK, NAK)."
          (_ (setf (clatter-connection-cap-available conn) available))
          (config (process-get (clatter-connection-process conn) :clatter-config))
          (sasl-type (plist-get config :sasl))
+         ;; SASL PLAIN sends the password in trivially-decoded base64;
+         ;; refuse it on plaintext connections unless the user opted in.
+         ;; SCRAM proves possession without exposing the password, so it
+         ;; is exempt (and its server proof is verified).
+         (allow-plain-sasl (or (plist-get config :tls)
+                               clatter-sasl-allow-plaintext))
          (client-cert (plist-get config :client-cert))
          (want-sasl-external (and (eq sasl-type 'external)
                                    client-cert
                                    (file-exists-p client-cert)))
          (want-sasl-plain (and (memq sasl-type '(plain scram-sha-256))
+                                (or (eq sasl-type 'scram-sha-256)
+                                    allow-plain-sasl)
                                 (clatter-get-password
                                  (clatter-connection-network-id conn))))
-         (caps-to-request (clatter-cap--find-matching
+           (caps-to-request (clatter-cap--find-matching
                            available clatter-wanted-capabilities)))
+    (when (and (eq sasl-type 'plain) (not allow-plain-sasl))
+      (message
+       "[clatter] %s: skipping SASL PLAIN on plaintext connection (enable :tls or `clatter-sasl-allow-plaintext')"
+       (clatter-connection-network-id conn)))
     ;; Soju bouncer-networks: requested only on a control connection
     ;; (`:bouncer t' with a bare username), so single-network bouncer
     ;; connections and child fan-out connections keep a minimal CAP REQ.

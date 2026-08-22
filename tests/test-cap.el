@@ -190,6 +190,50 @@ retrying a failure only the user can fix."
           (should (= spawned 1)))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-sasl-plain-skipped-on-plaintext ()
+  "SASL PLAIN is not requested on a plaintext connection."
+  (let ((clatter-networks
+         '(("plain"
+            :server "irc.example"
+            :nick "testnick"
+            :password "secret"
+            :sasl plain)))
+        (conn (clatter-test-make-connection "plain" "testnick"))
+        (proc (make-pipe-process :name "clatter-test-cap" :buffer nil)))
+    (unwind-protect
+        (progn
+          (setf (clatter-connection-process conn) proc)
+          (process-put proc :clatter-config
+                       '(:server "irc.example" :tls nil :sasl plain))
+          (cl-letf (((symbol-function 'clatter--debug) (lambda (&rest _))))
+            (clatter-test-with-mock-send
+             (clatter-cap--handle-ls conn "sasl")
+             (should-not (clatter-test-sent-matching "CAP REQ.*sasl")))))
+      (delete-process proc)
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-sasl-plain-requested-on-tls ()
+  "SASL PLAIN is requested when the connection uses TLS."
+  (let ((clatter-networks
+         '(("tls"
+            :server "irc.example"
+            :nick "testnick"
+            :password "secret"
+            :sasl plain)))
+        (conn (clatter-test-make-connection "tls" "testnick"))
+        (proc (make-pipe-process :name "clatter-test-cap" :buffer nil)))
+    (unwind-protect
+        (progn
+          (setf (clatter-connection-process conn) proc)
+          (process-put proc :clatter-config
+                       '(:server "irc.example" :tls t :sasl plain))
+          (cl-letf (((symbol-function 'clatter--debug) (lambda (&rest _))))
+            (clatter-test-with-mock-send
+             (clatter-cap--handle-ls conn "sasl")
+             (should (clatter-test-sent-matching "CAP REQ.*sasl")))))
+      (delete-process proc)
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-scram-continue-aborts-on-bad-server-proof ()
   "An invalid SCRAM server signature aborts the connection (RFC 5802 s5)."
   (let ((conn (clatter-connection--create :network-id "t" :process 'fake))
