@@ -15,6 +15,7 @@
 (require 'cl-lib)
 
 (declare-function clatter-send "clatter-connection")
+(declare-function clatter-connection-network-id "clatter-connection")
 (declare-function clatter-get-connection "clatter-connection")
 (declare-function clatter--watchdog "clatter-connection")
 (declare-function clatter-irc-privmsg "clatter-protocol")
@@ -198,7 +199,11 @@ Returns plist (:filename :port :position) or nil."
 (defun clatter-dcc--output-path (filename)
   "Compute output path for FILENAME, avoiding overwrites."
   (let* ((dir (expand-file-name clatter-dcc-download-directory))
-         (path (expand-file-name filename dir)))
+         ;; Sender controls FILENAME; strip directories so a name like
+         ;; "../../.bashrc" or an absolute path cannot escape the
+         ;; download directory.
+         (safe-name (file-name-nondirectory filename))
+         (path (expand-file-name safe-name dir)))
     (unless (file-directory-p dir)
       (make-directory dir t))
     ;; Avoid overwriting existing files

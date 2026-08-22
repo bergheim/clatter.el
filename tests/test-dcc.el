@@ -166,6 +166,16 @@
       (when (file-directory-p "/tmp/clatter-test-dcc/")
         (delete-directory "/tmp/clatter-test-dcc/" t)))))
 
+(ert-deftest clatter-test-dcc-output-path-no-traversal ()
+  "Sender-supplied filenames cannot escape the download directory."
+  (let ((clatter-dcc-download-directory "/tmp/clatter-test-dcc/"))
+    (dolist (name '("../../.bashrc" "/etc/passwd" "a/b.mkv"))
+      (let ((path (clatter-dcc--output-path name)))
+        (should (string-prefix-p "/tmp/clatter-test-dcc/" path))
+        (should (string= (file-name-nondirectory name)
+                         (file-name-nondirectory path)))))
+    (delete-directory "/tmp/clatter-test-dcc/" t)))
+
 ;;; --- Transfer State ---
 
 (ert-deftest clatter-test-dcc-reject ()
