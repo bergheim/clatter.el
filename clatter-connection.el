@@ -326,11 +326,16 @@ The program is selected by `clatter-tls-external-command'."
                        (concat "--x509keyfile=" client-cert)))
                (list server)))
       (_
+       ;; s_client does not abort on certificate verification failure
+       ;; without -verify_return_error, and checks no hostname without
+       ;; -verify_hostname; both are required to resist MITM.
        (append (list (if (equal clatter-tls-external-command "openssl")
                          "openssl" clatter-tls-external-command)
                      "s_client" "-quiet"
                      "-connect" (format "%s:%d" server port)
-                     "-servername" server)
+                     "-servername" server
+                     "-verify_return_error"
+                     "-verify_hostname" server)
                (when have-cert
                  (list "-cert" client-cert "-key" client-cert)))))))
 
