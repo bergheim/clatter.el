@@ -197,6 +197,21 @@
               :remaining 1)))
         (should-not (clatter-url-preview--anchor-live-p anchor))))))
 
+(ert-deftest clatter-url-preview-fetch-restricts-schemes ()
+  "Fetch restricts curl to http(s) schemes with bounded redirects (SSRF)."
+  (let ((clatter-url-preview--pending (make-hash-table :test 'equal))
+        captured)
+    (cl-letf (((symbol-function 'start-process)
+               (lambda (_name _buf &rest args)
+                 (setq captured args)
+                 'fake-proc))
+              ((symbol-function 'set-process-sentinel) (lambda (&rest _))))
+      (clatter-url-preview--fetch "https://example.com/" nil nil)
+      (should (member "--proto" captured))
+      (should (member "=http,https" captured))
+      (should (member "--proto-redir" captured))
+      (should (member "--max-redirs" captured)))))
+
 (provide 'test-url-preview)
 
 ;;; test-url-preview.el ends here

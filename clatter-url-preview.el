@@ -168,7 +168,12 @@ Uses curl subprocess to avoid blocking Emacs on DNS/TLS."
     (condition-case nil
         (let ((process (start-process
                       "clatter-url-preview" fetch-buffer
+                      ;; Restrict schemes and redirects: a posted link must
+                      ;; not bounce the user's curl into file:// or onto
+                      ;; internal-network hosts (SSRF).
                       "curl" "-sL" "-m" (number-to-string clatter-url-preview-timeout)
+                      "--proto" "=http,https" "--proto-redir" "=http,https"
+                      "--max-redirs" "5"
                       "-o" "-" "-r" "0-16384"
                       "-H" "User-Agent: Mozilla/5.0 (compatible; clatter.el)"
                       "-H" "Accept: text/html"

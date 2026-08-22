@@ -152,8 +152,12 @@ Uses curl subprocess to avoid blocking Emacs on DNS/TLS."
                 (set-buffer-multibyte nil)))
            (proc (start-process
                   "clatter-image" proc-buf
+                  ;; Restrict schemes and redirects (SSRF): see
+                  ;; clatter-url-preview.
                   "curl" "-sL"
                   "-m" "15"
+                  "--proto" "=http,https" "--proto-redir" "=http,https"
+                  "--max-redirs" "5"
                   "--max-filesize" (number-to-string clatter-image-max-size)
                   "-o" "-"
                   clean-url)))

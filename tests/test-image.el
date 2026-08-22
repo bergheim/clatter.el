@@ -79,6 +79,26 @@ test run."
                      "https://b.com/2.jpg?y=2#frag"
                      "https://c.com/3.gif")))))
 
+(ert-deftest clatter-image-fetch-restricts-schemes ()
+  "Image fetch restricts curl to http(s) schemes with bounded redirects."
+  (let ((clatter-image-enable t)
+        (clatter-image--active-fetches 0)
+        captured)
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+              ((symbol-function 'start-process)
+               (lambda (_name _buf &rest args)
+                 (setq captured args)
+                 'fake-proc))
+              ((symbol-function 'set-process-coding-system) (lambda (&rest _)))
+              ((symbol-function 'set-process-sentinel) (lambda (&rest _))))
+      (with-temp-buffer
+        (clatter-image--fetch "https://example.com/a.png"
+                              (current-buffer) (point-marker)))
+      (should (member "--proto" captured))
+      (should (member "=http,https" captured))
+      (should (member "--proto-redir" captured))
+      (should (member "--max-redirs" captured)))))
+
 (provide 'test-image)
 
 ;;; test-image.el ends here
