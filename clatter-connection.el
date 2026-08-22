@@ -419,6 +419,10 @@ network configuration."
             (gnutls-negotiate
              :process proc
              :hostname server
+             ;; NSM at its default 'medium level checks CA trust but not
+             ;; hostname mismatches; require strict hostname verification
+             ;; so a valid cert for the wrong host cannot MITM the session.
+             :verify-hostname-strict t
              :keylist (let ((client-cert (plist-get config :client-cert)))
                         (when (and client-cert (file-exists-p client-cert))
                           (list (list client-cert client-cert))))))
