@@ -144,9 +144,15 @@ failed handshake. Two behaviours worth knowing:
 - *SASL failure is not fatal.* On numeric 904/905/906 clatter reports the
   failure and finishes registration unauthenticated. If you end up connected
   but not identified, check the server buffer.
-- *A SCRAM server-signature mismatch is logged, not enforced.* The message
-  reads =SCRAM: server signature INVALID (possible MITM)= and the connection
-  continues. Treat it as a reason to investigate.
+- *A SCRAM server-signature mismatch aborts the connection.* Per RFC 5802
+  the server proves it holds your salted password; a wrong proof means an
+  impostor (MITM), so clatter disconnects instead of continuing.
+
+SASL PLAIN transmits the password as base64, plain text to any eavesdropper,
+so clatter skips it on plaintext connections. If an upstream is deliberately
+unencrypted (a local bouncer on loopback, say), set
+=clatter-sasl-allow-plaintext= to =t= to opt back in. SCRAM-SHA-256 is exempt:
+it never exposes the password, and its server proof is enforced as above.
 
 *** SASL EXTERNAL (CertFP)
 
@@ -477,7 +483,9 @@ pattern, or a =(PATTERN . NETWORK)= pair to scope it to one network.
 DCC is not enabled by =clatter-setup=; call =(clatter-dcc-setup)= yourself.
 Workflow: join an XDCC channel, search for packs (e.g. =!search query= in #nibl
 on Rizon), then request with =/dcc get BotName #PackNumber=. You will be
-prompted to accept. Files are saved to =~/Downloads/= by default.
+prompted to accept. Files are saved to =~/Downloads/= by default; received
+filenames are reduced to their basename, so a hostile absolute path or
+=../..= segments cannot write outside the download directory.
 
 ** Autojoin Persistence
 
@@ -607,6 +615,7 @@ leader does not conflict with typing messages.
 | =clatter-default-port=            | =6697=                | Fallback port                             |
 | =clatter-default-tls=             | =t=                   | Use TLS unless a network overrides it     |
 | =clatter-use-auth-source=         | =t=                   | Look up passwords via auth-source         |
+| =clatter-sasl-allow-plaintext=    | =nil=                 | Opt in to SASL PLAIN without TLS          |
 | =clatter-proxy=                   | =nil=                 | Global SOCKS5 proxy plist                 |
 | =clatter-tls-method=              | ='builtin=            | =builtin= (in-process GnuTLS) or =external=   |
 | =clatter-tls-external-command=    | ="gnutls-cli"=        | External TLS client, when =external=        |
@@ -625,6 +634,12 @@ leader does not conflict with typing messages.
 single-threaded Emacs event loop if a socket goes silently half-open. =external=
 runs =gnutls-cli= (or =openssl=) as a subprocess instead, at the cost of being
 incompatible with =clatter-proxy=.
+
+Both methods verify the certificate chain and require the certificate's
+hostname to match the server. =builtin= negotiates with
+=:verify-hostname-strict t= (stricter than the GnuTLS/NSM defaults); =external=
+passes =-verify_hostname= (openssl) or relies on =gnutls-cli='s default
+abort-on-failure.
 
 ** Identity and Nick Recovery
 
@@ -931,6 +946,9 @@ Toggle per buffer with =M-x clatter-nicklist-toggle=.
 | =clatter-url-preview-exclude-patterns= | 15 regexps | Binary/media URLs to skip    |
 
 Titles are cached, so a repeated link is not re-fetched. Requires =curl=.
+Fetches are restricted to the =http= and =https= schemes with at most five
+redirects, so a posted link cannot redirect into =file://= or onto
+internal-network hosts.
 
 ** Inline Images
 
@@ -942,7 +960,9 @@ Titles are cached, so a repeated link is not re-fetched. Requires =curl=.
 | =clatter-image-max-size=   | =5242880= (5 MB)  | Max download size            |
 | =clatter-image-extensions= | =(png jpg ...)=   | Recognized image extensions  |
 
-GUI frames only; a no-op in a terminal. Fetching is an async =curl= subprocess.
+GUI frames only; a no-op in a terminal. Fetching is an async =curl= subprocess
+with the same scheme and redirect restrictions as URL preview, plus a magic-byte
+check on the downloaded data.
 
 ** Raw Protocol Log
 
