@@ -190,5 +190,32 @@ retrying a failure only the user can fix."
           (should (= spawned 1)))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-scram-continue-aborts-on-bad-server-proof ()
+  "An invalid SCRAM server signature aborts the connection (RFC 5802 s5)."
+  (let ((conn (clatter-connection--create :network-id "t" :process 'fake))
+        (state (clatter-scram-state--create :auth-message "m"
+                                            :salted-password "sp"))
+        aborted)
+    (cl-letf (((symbol-function 'process-get) (lambda (_p _k) state))
+              ((symbol-function 'clatter-scram-verify-server) (lambda (&rest _) nil))
+              ((symbol-function 'clatter--connect-abort)
+               (lambda (_proc reason) (setq aborted reason))))
+      (clatter-cap--scram-continue conn "dj13ZA==")
+      (should aborted)
+      (should (string-match-p "MITM" aborted)))))
+
+(ert-deftest clatter-test-scram-continue-accepts-valid-server-proof ()
+  "A valid SCRAM server signature leaves the connection alone."
+  (let ((conn (clatter-connection--create :network-id "t" :process 'fake))
+        (state (clatter-scram-state--create :auth-message "m"
+                                            :salted-password "sp"))
+        abort-called)
+    (cl-letf (((symbol-function 'process-get) (lambda (_p _k) state))
+              ((symbol-function 'clatter-scram-verify-server) (lambda (&rest _) t))
+              ((symbol-function 'clatter--connect-abort)
+               (lambda (&rest _) (setq abort-called t))))
+      (clatter-cap--scram-continue conn "dj13ZA==")
+      (should-not abort-called))))
+
 (provide 'test-cap)
 ;;; test-cap.el ends here

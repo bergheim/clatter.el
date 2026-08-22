@@ -219,10 +219,16 @@ For SCRAM-SHA-256: multi-step challenge-response."
 SERVER-RESPONSE is base64-encoded server message."
   (let ((state (process-get (clatter-connection-process conn) :scram-state)))
     (if (clatter-scram-state-auth-message state)
-        ;; We already sent client-final, this is server-final
+        ;; We already sent client-final, this is server-final.
+        ;; RFC 5802 section 5: an invalid server signature means the peer
+        ;; does not hold our salted password (MITM/impostor) -- abort.
         (if (clatter-scram-verify-server state server-response)
             (clatter--debug "SCRAM: server signature verified")
-          (clatter--debug "SCRAM: server signature INVALID (possible MITM)"))
+          (clatter--watchdog "SCRAM-FAIL %s invalid server signature"
+                             (clatter-connection-network-id conn))
+          (clatter--connect-abort
+           (clatter-connection-process conn)
+           "SCRAM: server signature invalid (possible MITM)"))
       ;; This is server-first, send client-final
       (let ((client-final (clatter-scram-client-final state server-response)))
         (clatter-send conn (format "AUTHENTICATE %s" client-final))))))
