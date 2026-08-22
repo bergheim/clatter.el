@@ -103,15 +103,17 @@ Only `NETWORK' notifications are interesting: they carry
 Prefer the network's `name' attribute; fall back to the netid."
   (or (cdr (assoc "name" attrs #'string=)) netid))
 
-(defun clatter-soju--fan-out-args (control-config attrs child-id)
+(defun clatter-soju--fan-out-args (control-id control-config attrs child-id)
   "Return the `clatter-connect' keyword plist for a child of CONTROL-CONFIG.
-ATTRS is the network's parsed attributes; CHILD-ID the clatter network-id
-to use (the network's `name').  The child connects to the same bouncer
-endpoint as the control connection and routes to the upstream via the
-\"<bouncer-user>/<network-name>\" username form, so Soju binds it to that
-network without any `BOUNCER BIND'.  It inherits `:bouncer t' (skip
-NickServ/reclaim) and the bouncer credentials, and deliberately omits
-`:autojoin' (Soju replays saved JOINs upstream-side)."
+CONTROL-ID is the clatter network-id of the control connection, used to
+resolve the bouncer password via auth-source when CONTROL-CONFIG has no
+explicit `:password'.  ATTRS is the network's parsed attributes; CHILD-ID
+the clatter network-id to use (the network's `name').  The child connects
+to the same bouncer endpoint as the control connection and routes to the
+upstream via the \"<bouncer-user>/<network-name>\" username form, so Soju
+binds it to that network without any `BOUNCER BIND'.  It inherits `:bouncer
+t' (skip NickServ/reclaim) and the bouncer credentials, and deliberately
+omits `:autojoin' (Soju replays saved JOINs upstream-side)."
   (let* ((bouncer-user (or (plist-get control-config :username)
                            (plist-get control-config :nick)))
          (nick (or (cdr (assoc "nickname" attrs #'string=))
@@ -121,9 +123,21 @@ NickServ/reclaim) and the bouncer credentials, and deliberately omits
                      :nick nick
                      :username (format "%s/%s" bouncer-user child-id)
                      :bouncer t)))
-    (dolist (key '(:port :password :sasl :client-cert :proxy :tor))
+    (dolist (key '(:port :sasl :client-cert :proxy :tor))
       (when (plist-member control-config key)
         (setq args (plist-put args key (plist-get control-config key)))))
+    ;; A bouncer child authenticates to the bouncer with the control's
+    ;; credentials, so resolve the bouncer password the same way the
+    ;; control does: explicit `:password', then auth-source keyed on the
+    ;; *control* network-id/server/user.  The child's own lookup would use
+    ;; the child network-id and nick, which miss the bouncer creds and fail
+    ;; the SASL password precheck for children whose upstream name differs
+    ;; from the bouncer identity (e.g. an OFTC child of a bouncer whose
+    ;; auth-source entry is stored under the control network-id).
+    (let ((password (or (plist-get control-config :password)
+                        (clatter-get-password control-id control-config))))
+      (when password
+        (setq args (plist-put args :password password))))
     args))
 
 (defun clatter-soju--child-live-p (child-id)
@@ -159,7 +173,7 @@ cancels any pending reconnect, so re-spawning a dead child is safe."
                                netid existing)
              (let* ((child-id (clatter-soju--child-id netid attrs))
                     (args (clatter-soju--fan-out-args
-                           control-config attrs child-id)))
+                           network-id control-config attrs child-id)))
                (puthash netid child-id children)
                (clatter--debug "soju: fanning out %s -> %s%s"
                                netid child-id

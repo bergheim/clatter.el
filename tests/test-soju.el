@@ -38,7 +38,8 @@
                           :sasl plain :bouncer t))
         (attrs (clatter-soju--parse-attrs
                 "name=libera;state=connected;nickname=trev")))
-    (let ((args (clatter-soju--fan-out-args control-config attrs "libera")))
+    (let ((args (clatter-soju--fan-out-args
+                 "soju" control-config attrs "libera")))
       (should (equal (plist-get args :server) "soju.example"))
       (should (equal (plist-get args :port) 6697))
       (should (eq (plist-get args :tls) t))
@@ -61,9 +62,31 @@
   (let ((control-config '(:server "soju.example" :tls t :nick "me"
                           :username "sojuuser" :password "secret"))
         (attrs (clatter-soju--parse-attrs "name=libera;state=connected")))
-    (let ((args (clatter-soju--fan-out-args control-config attrs "libera")))
+    (let ((args (clatter-soju--fan-out-args
+                 "soju" control-config attrs "libera")))
       (should (equal (plist-get args :nick) "me"))
       (should (equal (plist-get args :username) "sojuuser/libera")))))
+
+(ert-deftest clatter-soju-test-fan-out-args-resolves-control-password ()
+  "A child inherits the bouncer password resolved via auth-source.
+The control has no explicit `:password'; the child must still carry the
+bouncer password so its SASL precheck and PASS registration succeed.
+The lookup is keyed on the *control* network-id, not the child's, so a
+child whose upstream name differs from the bouncer creds (e.g. oftc)
+still resolves the right password."
+  (let ((control-config '(:server "soju.example" :tls t :nick "me"
+                          :username "sojuuser" :sasl plain :bouncer t))
+        (attrs (clatter-soju--parse-attrs "name=oftc;state=connected")))
+    (cl-letf (((symbol-function 'auth-source-search)
+               (lambda (&rest keys)
+                 ;; Only the control identity matches; the child identity
+                 ;; would miss, which is exactly the bug this fixes.
+                 (when (equal (plist-get keys :host) "soju")
+                   (list (list :secret (lambda () "bouncer-secret")))))))
+      (let ((args (clatter-soju--fan-out-args
+                   "soju" control-config attrs "oftc")))
+        (should (equal (plist-get args :password) "bouncer-secret"))
+        (should (eq (plist-get args :sasl) 'plain))))))
 
 ;; --- BOUNCER NETWORK stashing + fan-out ---
 
