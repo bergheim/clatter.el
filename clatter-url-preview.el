@@ -17,6 +17,7 @@
 (require 'clatter-connection)
 (require 'clatter-protocol)
 (require 'clatter-model)
+(require 'clatter-pals)
 (require 'clatter-ui)
 
 ;; --- Configuration ---
@@ -264,7 +265,8 @@ behind by buffer truncation."
                            target
                          (if (clatter-nick-equal-p target my-nick case-mapping)
                              sender-nick target)))
-           (buf (clatter-get-buffer network buf-target))
+           (buf (unless (clatter-fool-p sender-nick network)
+                  (clatter-get-buffer network buf-target)))
            (pos 0)
            requests)
       (when buf

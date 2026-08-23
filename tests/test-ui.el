@@ -1199,6 +1199,24 @@ system messages."
                                 (ensure-list (get-text-property (match-beginning 0) 'invisible)))))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-fool-image-links-are-not-previewed ()
+  "Inline image scanning skips fool messages."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-fools '("fool"))
+        scanned)
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-mode)
+          (setq-local clatter--network "testnet")
+          (setq-local clatter--target "#test")
+          (clatter-ui-setup-buffer (current-buffer))
+          (cl-letf (((symbol-function 'clatter-image--scan-message)
+                     (lambda (&rest _) (setq scanned t))))
+            (clatter-insert-privmsg
+             (current-buffer) "fool" "https://example.com/no.png" conn))
+          (should-not scanned))
+      (remhash "testnet" clatter-connections))))
+
 (ert-deftest clatter-test-fool-message-gets-dim-face ()
   "Messages with the fool invisibility category get `clatter-fool'."
   (with-temp-buffer

@@ -818,6 +818,7 @@ SERVER-TIME overrides the current time for the timestamp."
       (setq props (plist-put props 'clatter-self-echo-nonce self-echo-nonce)))
     (clatter--insert-message buffer formatted nil props server-time invisible)
     (when (and (not clatter--suppress-image-scan)
+               (not (clatter-fool-p sender (clatter-connection-network-id conn)))
                (fboundp 'clatter-image--scan-message))
       (let ((img-marker (with-current-buffer buffer
                           (copy-marker

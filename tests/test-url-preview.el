@@ -31,6 +31,20 @@
         (should-not (marker-insertion-type
                      (clatter-url-preview--anchor-tail captured-marker)))))))
 
+(ert-deftest clatter-url-preview-skips-fools ()
+  "Links from fools are not fetched or rendered."
+  (let ((clatter-url-preview-enable t)
+        (clatter-fools '("alice"))
+        fetched)
+    (cl-letf (((symbol-function 'clatter-get-buffer)
+               (lambda (&rest _) (current-buffer)))
+              ((symbol-function 'clatter-url-preview--fetch)
+               (lambda (&rest _) (setq fetched t))))
+      (clatter-url-preview--on-privmsg
+       (clatter-test-make-connection "preview-fool" "me")
+       '("alice" nil nil) "#chat" "https://example.com/one" nil))
+    (should-not fetched)))
+
 (ert-deftest clatter-url-preview-hook-renders-after-message-in-both-orders ()
   "URL previews follow their source message for either message order."
   (dolist (order '(newest-first oldest-first))
