@@ -401,25 +401,39 @@ Other characters use their `char-width'."
       (setq w (+ w (if (= c ?…) 2 (char-width c)))))
     w))
 
+(defun clatter--format-sender (sender)
+  "Render SENDER through `clatter-sender-format', replacing `%nick'."
+  (replace-regexp-in-string "%nick" sender clatter-sender-format t t))
+
 (defun clatter--truncate-nick-column (nick-str width)
   "Truncate NICK-STR for the nick column, fitting within WIDTH display cols.
-A `<nick>' or `-nick-' form keeps its delimiters and signals the cut
-with an ellipsis (`…'), so a long nick becomes e.g. `<longnic…>'.  The
-body is trimmed so the result's display width (counting `…' as two
-cells, see `clatter--nick-column-display-width') is WIDTH, which makes
-the closing `>' line up with the delimiters of shorter nicks in fonts
-that render the ellipsis wide.  Any other shape is clipped to WIDTH
-display cols."
+A nick wrapped by `clatter-sender-format', or a `-nick-' notice form,
+keeps its delimiters and signals the cut with an ellipsis (`…'), so a
+long nick becomes e.g. `<longnic…>'.  The body is trimmed so the
+result's display width (counting `…' as two cells, see
+`clatter--nick-column-display-width') is WIDTH, which makes the closing
+delimiter line up with the delimiters of shorter nicks in fonts that
+render the ellipsis wide.  Any other shape is clipped to WIDTH display
+cols."
   (save-match-data
-    (cond
-     ((and (>= width 5)
-           (string-match "\\`<\\(.+\\)>\\'" nick-str))
-      ;; `<' + body + `…' + `>' = 4 display cols + body; body = WIDTH - 4.
-      (concat "<" (substring (match-string 1 nick-str) 0 (- width 4)) "…>"))
-     ((and (>= width 5)
-           (string-match "\\`-\\(.+\\)-\\'" nick-str))
-      (concat "-" (substring (match-string 1 nick-str) 0 (- width 4)) "…-"))
-     (t (substring nick-str 0 (1- width))))))
+    (let* ((parts (split-string clatter-sender-format "%nick"))
+           (pre (or (car parts) ""))
+           (post (or (cadr parts) ""))
+           ;; delimiters + the double-width ellipsis
+           (overhead (+ (length pre) (length post) 2)))
+      (cond
+       ((and (> width overhead)
+             (string-prefix-p pre nick-str)
+             (string-suffix-p post nick-str)
+             (> (length nick-str) (+ (length pre) (length post))))
+        (concat pre
+                (substring nick-str (length pre)
+                           (+ (length pre) (- width overhead)))
+                "…" post))
+       ((and (>= width 5)
+             (string-match "\\`-\\(.+\\)-\\'" nick-str))
+        (concat "-" (substring (match-string 1 nick-str) 0 (- width 4)) "…-"))
+       (t (substring nick-str 0 (1- width)))))))
 
 (defun clatter--format-nick-column (nick-str &optional face sender blank)
   "Right-align NICK-STR within `clatter-nick-column-width'.
@@ -787,7 +801,7 @@ SERVER-TIME overrides the current time for the timestamp."
                      (if grouped-p
                          (clatter--format-nick-column "" nil sender 'blank)
                        (clatter--format-nick-column
-                        (concat (format "<%s>" sender) bot-tag-delim bot-tag)
+                        (concat (clatter--format-sender sender) bot-tag-delim bot-tag)
                         nick-face sender)))))
          (msg-text (prog1 hl-text
                      (cond

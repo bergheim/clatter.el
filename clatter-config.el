@@ -243,6 +243,15 @@ have channels with very long nicknames."
   :type 'integer
   :group 'clatter)
 
+(defcustom clatter-sender-format "<%nick>"
+  "Format of the sender prefix on message lines.
+`%nick' is replaced by the sender's nickname: \"<%nick>\" renders
+`<alice>', \"[%nick]\" renders `[alice]', \"%nick:\" renders `alice:'.
+Only regular messages use this; actions and notices keep their own
+prefixes."
+  :type 'string
+  :group 'clatter)
+
 (defcustom clatter-nick-column-truncate nil
   "When non-nil, truncate nicks longer than `clatter-nick-column-width'.
 By default a nick that surpasses the column width overflows and pushes

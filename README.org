@@ -205,6 +205,7 @@ Every optional extra enabled at once, as a starting point to trim down:
   (clatter-group-messages-by-nick t)       ; show a nick once per burst
   (clatter-track-shorten 4)                ; e.g. #systemcrafters -> #syst
   (clatter-timestamp-format "%H:%M:%S")
+  (clatter-sender-format "[%nick]")        ; nick prefix, e.g. [alice] hey
   :config
   (require 'gnutls)
   (clatter-setup)

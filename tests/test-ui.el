@@ -2195,6 +2195,22 @@ previous message's text properties there used to raise
                            ?\s))))
       (remhash "testnet" clatter-connections))))
 
+(ert-deftest clatter-sender-format-controls-nick-prefix ()
+  "`clatter-sender-format' shapes the sender prefix and its truncation."
+  (should (equal (clatter--format-sender "alice") "<alice>"))
+  (let ((clatter-sender-format "[%nick]"))
+    (should (equal (clatter--format-sender "alice") "[alice]"))
+    ;; delimiters survive truncation, ellipsis counts as two columns
+    (should (equal (clatter--truncate-nick-column "[longnickname]" 8)
+                   "[long…]")))
+  (let ((clatter-sender-format "%nick:"))
+    (should (equal (clatter--format-sender "alice") "alice:"))
+    (should (equal (clatter--truncate-nick-column "longnickname:" 8)
+                   "longn…:")))
+  ;; notice form is unaffected
+  (should (equal (clatter--truncate-nick-column "-longnickname-" 8)
+                 "-long…-")))
+
 (provide 'test-ui)
 
 ;;; test-ui.el ends here
