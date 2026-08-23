@@ -15,6 +15,7 @@
 
 (require 'button)
 (require 'cl-lib)
+(require 'elisp-mode)
 (require 'clatter-config)
 (require 'clatter-model)
 (require 'clatter-format)
@@ -24,6 +25,11 @@
 
 (defcustom clatter-hl-nicks-enabled t
   "Enable in-text nick highlighting."
+  :type 'boolean
+  :group 'clatter)
+
+(defcustom clatter-hl-elisp-symbols-enabled t
+  "Turn quoted Elisp symbol names into links to their help pages."
   :type 'boolean
   :group 'clatter)
 
@@ -244,7 +250,45 @@ Returns `clatter-my-nick' for our own nick, otherwise a named
       'clatter-my-nick
     (clatter-hl-nick-face-symbol nick)))
 
-;; --- URL detection and highlighting ---
+;; --- Elisp symbol and URL links ---
+
+(defvar clatter-hl-elisp-symbol-regexp
+  "[`‘]\\(\\(?:\\sw\\|\\s_\\)+\\)['’]"
+  "Regexp matching doc-quoted Elisp symbol names.")
+
+(defun clatter-hl--describe-symbol-button (button)
+  "Describe the Elisp symbol named by BUTTON, or show apropos results."
+  (let* ((name (button-get button 'clatter-elisp-symbol))
+         (symbol (intern-soft name)))
+    (if (and symbol
+             (or (boundp symbol) (fboundp symbol) (facep symbol)))
+        (describe-symbol symbol)
+      (apropos name))))
+
+(defun clatter-hl-elisp-symbols-in-string (text)
+  "Turn doc-quoted Elisp symbol names in TEXT into help buttons."
+  (if (not clatter-hl-elisp-symbols-enabled)
+      text
+    (let ((pos 0)
+          (result ""))
+      (with-syntax-table emacs-lisp-mode-syntax-table
+        (while (string-match clatter-hl-elisp-symbol-regexp text pos)
+          (let ((start (match-beginning 1))
+                (end (match-end 1))
+                (name (match-string-no-properties 1 text)))
+            (setq result
+                  (concat result
+                          (substring text pos start)
+                          (propertize (substring text start end)
+                                      'button '(t)
+                                      'category 'default-button
+                                      'follow-link t
+                                      'clatter-elisp-symbol name
+                                      'face 'link
+                                      'help-echo (format "Describe `%s'" name)
+                                      'action #'clatter-hl--describe-symbol-button)))
+            (setq pos end))))
+      (concat result (substring text pos)))))
 
 (defvar clatter-url-regexp
   "https?://[^ \t\n\r<>\"']+"
@@ -370,13 +414,14 @@ Returns a list of (DISPLAY-STRING . URL) pairs, newest first."
 
 (defun clatter-hl-format-text (text buffer conn)
   "Apply all highlighting to message TEXT for BUFFER using CONN.
-Applies mIRC formatting first, then URLs, then nick highlighting."
+Applies mIRC formatting, URLs, nicks, keywords, and Elisp symbol links."
   (ignore conn)
   (let ((result text))
     (setq result (clatter-format-parse result))
     (setq result (clatter-hl-urls-in-string result))
     (setq result (clatter-hl-nicks-in-string result buffer))
     (setq result (clatter-hl-keywords-in-string result))
+    (setq result (clatter-hl-elisp-symbols-in-string result))
     result))
 
 ;; Build the named nick faces once at load time.

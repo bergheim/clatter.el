@@ -23,6 +23,40 @@
       (should (equal (button-get button 'clatter-url)
                      "https://example.com/a")))))
 
+(ert-deftest clatter-hl-elisp-symbols-are-help-buttons ()
+  "Doc-quoted Elisp symbols produce standard help buttons."
+  (dolist (case '(("`clatter-hl-nicks-enabled'" . "clatter-hl-nicks-enabled")
+                  ("‘1+’" . "1+")
+                  ("`string='" . "string=")))
+    (with-temp-buffer
+      (insert (clatter-hl-elisp-symbols-in-string (car case)))
+      (goto-char (1+ (point-min)))
+      (let ((button (button-at (point))))
+        (should button)
+        (should (equal (button-get button 'clatter-elisp-symbol)
+                       (cdr case)))))))
+
+(ert-deftest clatter-hl-elisp-symbol-buttons-describe-or-run-apropos ()
+  "Known symbols open help; unknown names run apropos."
+  (let (described searched)
+    (cl-letf (((symbol-function 'describe-symbol)
+               (lambda (symbol &rest _) (setq described symbol)))
+              ((symbol-function 'apropos)
+               (lambda (name &rest _) (setq searched name))))
+      (dolist (name '("clatter-hl-nicks-enabled" "clatter-no-such-symbol-xyzzy"))
+        (with-temp-buffer
+          (insert (clatter-hl-elisp-symbols-in-string (format "`%s'" name)))
+          (goto-char (+ (point-min) 1))
+          (push-button))))
+    (should (eq described 'clatter-hl-nicks-enabled))
+    (should (equal searched "clatter-no-such-symbol-xyzzy"))))
+
+(ert-deftest clatter-hl-elisp-symbols-never-buttonize-code ()
+  "Quoted Elisp forms remain inert text."
+  (with-temp-buffer
+    (insert (clatter-hl-elisp-symbols-in-string "`(+ 1 2)'"))
+    (should-not (next-button (point-min) t))))
+
 (ert-deftest clatter-hl-nick-index-deterministic-and-in-range ()
   "The palette index is stable and within bounds."
   (let ((n (length clatter-hl-nick-base-faces)))
