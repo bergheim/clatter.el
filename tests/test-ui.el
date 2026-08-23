@@ -1556,6 +1556,47 @@ system messages."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
+(ert-deftest clatter-test-backlog-page-renders-at-oldest-end ()
+  "A `clatter-chathistory-more' page lands past existing history.
+Both message orders keep the page's own messages in display order."
+  (dolist (order '(newest-first oldest-first))
+    (let ((clatter-message-order order)
+          (conn (clatter-test-make-connection "testnet" "me"))
+          (buf nil))
+      (unwind-protect
+          (progn
+            (setq buf (clatter-get-or-create-buffer "testnet" "#chan" 'channel))
+            (with-current-buffer buf (clatter-ui-setup-buffer buf))
+            (clatter-ui--on-batch-complete
+             conn "chathistory" "#chan"
+             (list (list :type 'privmsg :sender "a" :text "old1"
+                         :time (encode-time 0 0 10 1 1 2026 t))
+                   (list :type 'privmsg :sender "a" :text "old2"
+                         :time (encode-time 0 0 11 1 1 2026 t))))
+            (with-current-buffer buf
+              (setq-local clatter--backlog-page-pending t))
+            (clatter-ui--on-batch-complete
+             conn "chathistory" "#chan"
+             (list (list :type 'privmsg :sender "c" :text "older1"
+                         :time (encode-time 0 0 8 1 1 2026 t))
+                   (list :type 'privmsg :sender "c" :text "older2"
+                         :time (encode-time 0 0 9 1 1 2026 t))))
+            (with-current-buffer buf
+              (let ((texts nil))
+                (save-excursion
+                  (goto-char (point-min))
+                  (while (re-search-forward "\\(older[0-9]\\|old[0-9]\\)" nil t)
+                    (push (match-string 1) texts)))
+                (should (equal (nreverse texts)
+                               (if (eq order 'newest-first)
+                                   '("old2" "old1" "older2" "older1")
+                                 '("older1" "older2" "old1" "old2"))))
+                (should-not clatter--backlog-page-pending))))
+        (clatter-test-cleanup)
+        (when buf
+          (clatter-remove-buffer "testnet" "#chan")
+          (when (buffer-live-p buf) (kill-buffer buf)))))))
+
 (ert-deftest clatter-test-batch-playback-renders-read-history-without-activity ()
   "Batch playback renders seen messages without marking them unread."
   (let ((conn (clatter-test-make-connection "libera" "me"))

@@ -61,6 +61,12 @@ Populated by WHOX (extended WHO) replies.")
 (defvar-local clatter--buffer-type nil
   "Buffer type: server, channel, or query.")
 
+(defvar-local clatter--backlog-page-pending nil
+  "Non-nil when the next history batch for this buffer is an older page.
+Set by `clatter-chathistory-more', consumed by the batch renderer, which
+places such a page at the buffer's oldest end instead of next to the
+prompt.")
+
 ;; --- Local read state ---
 
 (defvar-local clatter--last-read-time nil

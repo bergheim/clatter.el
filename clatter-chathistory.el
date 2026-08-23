@@ -265,6 +265,9 @@ COUNT defaults to `clatter-chathistory-limit'."
             (let ((earliest clatter-chathistory--earliest-timestamp))
               (if earliest
                   (progn
+                    ;; The reply is older than everything on screen: tell the
+                    ;; renderer to place it at the buffer's oldest end.
+                    (setq-local clatter--backlog-page-pending t)
                     (clatter-chathistory-fetch-before conn target earliest n)
                     (message "Requested %d older messages for %s" n target))
                 (clatter-chathistory-fetch-latest conn target n)))

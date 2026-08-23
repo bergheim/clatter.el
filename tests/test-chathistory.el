@@ -43,7 +43,9 @@
             (clatter-test-with-mock-send
               (clatter-chathistory-more 10)
               (should (clatter-test-sent-matching
-                       "^CHATHISTORY BEFORE #emacs timestamp=2026-01-01T10:00:00.000Z 10$")))))
+                       "^CHATHISTORY BEFORE #emacs timestamp=2026-01-01T10:00:00.000Z 10$"))
+              ;; The reply must render at the buffer's oldest end.
+              (should clatter--backlog-page-pending))))
       (clatter-test-cleanup)
       (when (buffer-live-p buf)
         (kill-buffer buf)))))

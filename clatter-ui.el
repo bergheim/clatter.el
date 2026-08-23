@@ -473,23 +473,48 @@ Bound around history/batch playback, which replays messages with their
 original (often widely spaced) timestamps: visual adjacency is the right
 grouping signal there, not the live burst window.")
 
+(defvar clatter--insert-at-backlog-end nil
+  "When non-nil, messages insert at the buffer's oldest end.
+Bound while rendering a backwards CHATHISTORY page (see
+`clatter-chathistory-more') so an older page lands past the existing
+history instead of next to the prompt.")
+
+(defun clatter--backlog-insert-position ()
+  "Return the position of the current buffer's oldest end.
+For `newest-first' that is `point-max'; for `oldest-first' it is the end
+of the protected input padding at the top of the message area."
+  (if (eq clatter-message-order 'oldest-first)
+      (or (and (markerp clatter--input-padding-end)
+               (marker-position clatter--input-padding-end))
+          (point-min))
+    (point-max)))
+
+(defun clatter--message-insert-position ()
+  "Return the position where the next message inserts in the current buffer."
+  (if clatter--insert-at-backlog-end
+      (clatter--backlog-insert-position)
+    (or (and (markerp clatter--messages-marker)
+             (marker-position clatter--messages-marker))
+        (point-max))))
+
 (defun clatter--previous-message-bol (&optional buffer)
   "Return the bol of the chronologically-previous message in BUFFER.
 BUFFER defaults to the current buffer.  The neighbor is the message
-adjacent to where the next message will insert (at
-`clatter--messages-marker'), determined by `clatter-message-order':
-the line at the marker for `newest-first', the line above it for
-`oldest-first'.  Returns nil when the position is out of range or no
-message text properties are present there."
+adjacent to where the next message will insert (see
+`clatter--message-insert-position').  Inserts that push earlier messages
+away leave the neighbor on the line at that position; inserts that append
+after them leave it on the line above.  Returns nil when the position is
+out of range or no message text properties are present there."
   (let ((buf (or buffer (current-buffer))))
     (when (buffer-live-p buf)
       (with-current-buffer buf
-        (let ((pos (or (and (markerp clatter--messages-marker)
-                            (marker-position clatter--messages-marker))
-                       (point-max))))
+        (let ((pos (clatter--message-insert-position)))
           (save-excursion
             (goto-char pos)
-            (unless (eq clatter-message-order 'newest-first)
+            ;; Backlog rendering reverses which side the previous message
+            ;; sits on: newest-first appends, oldest-first prepends.
+            (when (eq (and clatter--insert-at-backlog-end t)
+                      (eq clatter-message-order 'newest-first))
               (forward-line -1))
             (let ((bol (line-beginning-position)))
               (and (get-text-property bol 'clatter-sender)
@@ -599,7 +624,7 @@ append at the bottom like a traditional IRC client."
             ;; and insertion type (set in `clatter--setup-prompt') determine
             ;; the layout: below a top prompt for `newest-first', or above a
             ;; bottom prompt for `oldest-first'.
-            (goto-char (or clatter--messages-marker (point-max)))
+            (goto-char (clatter--message-insert-position))
             (let* ((formatted-timestamp
                     (unless no-timestamp
                       (format-time-string clatter-timestamp-format time)))
@@ -2461,18 +2486,34 @@ otherwise (the process filter may run in any buffer, so don't rely on
 
 (defun clatter-ui--on-batch-complete (conn _batch-type target messages)
   "Handle completed batch: render MESSAGES for TARGET on CONN.
-Renders a visual separator before and after history playback."
+Renders a visual separator before and after history playback.
+A page requested by `clatter-chathistory-more' is older than everything
+on screen, so it renders at the buffer's oldest end, in the direction
+`clatter-message-order' dictates."
   (let* ((network (clatter-connection-network-id conn))
          (buf (clatter-get-buffer network target)))
     (when (and buf (buffer-live-p buf) messages)
       ;; Insert separator before history.  Read-state handling belongs to the
       ;; insertion path so seen messages remain visible without adding activity.
-      (let* ((sep-text (propertize
+      (let* ((backlog (with-current-buffer buf
+                        (prog1 clatter--backlog-page-pending
+                          (setq-local clatter--backlog-page-pending nil))))
+             (clatter--insert-at-backlog-end backlog)
+             (count (length messages))
+             ;; Rendering at the oldest end walks the block backwards: the
+             ;; end separator, then messages newest-first, then the start
+             ;; separator.
+             (messages (if backlog (reverse messages) messages))
+             (sep-text (propertize
                         (concat " " (make-string 30 ?-) " history "
                                 (make-string 30 ?-) " ")
                         'face 'font-lock-doc-face))
-             (count (length messages)))
-        (clatter--insert-message buf sep-text t)
+             (end-sep-text (propertize (format " %s end of history (%d messages) %s "
+                                               (make-string 20 ?-)
+                                               count
+                                               (make-string 20 ?-))
+                                       'face 'font-lock-doc-face)))
+        (clatter--insert-message buf (if backlog end-sep-text sep-text) t)
         ;; Insert each message with dimmed style.  Suppress inline image
         ;; scanning/fetching for history playback: a large backlog would
         ;; otherwise scan every old message and stampede curl subprocesses.
@@ -2498,14 +2539,7 @@ Renders a visual separator before and after history playback."
                 ('action (clatter-insert-action buf sender text conn time invisible))
                 (_ (clatter-insert-privmsg buf sender text conn time invisible))))))
         ;; Insert end separator
-        (clatter--insert-message
-         buf
-         (propertize (format " %s end of history (%d messages) %s "
-                             (make-string 20 ?-)
-                             count
-                             (make-string 20 ?-))
-                     'face 'font-lock-doc-face)
-         t)))))
+        (clatter--insert-message buf (if backlog sep-text end-sep-text) t)))))
 
 ;; --- CTCP replies ---
 
