@@ -1698,11 +1698,19 @@ If the input contains multiple lines and exceeds
   (clatter-execute-command input))
 
 (defun clatter-bol ()
-  "Move `point' to the beginning of the current line."
+  "Move `point' to the beginning of the current line.
+With `visual-line-mode' enabled, move to the beginning of the current
+visual line instead.  Either way the prompt's field property keeps
+point out of the prompt, so on the prompt line this stops at the start
+of the input."
   (interactive)
-  (and (forward-line 0)
-       (equal (point-marker) clatter--prompt-marker)
-       (goto-char clatter--input-marker)))
+  (if visual-line-mode
+      (beginning-of-visual-line)
+    (move-beginning-of-line 1))
+  ;; Field motion stops at the input origin when coming from the input,
+  ;; but a click can leave point inside the prompt itself; snap out.
+  (when (equal (point-marker) clatter--prompt-marker)
+    (goto-char clatter--input-marker)))
 
 (defun clatter--clamp-to-input (position)
   "Clamp POSITION to the bounds of the input area."
