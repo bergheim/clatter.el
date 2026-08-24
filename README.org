@@ -197,7 +197,7 @@ Every optional extra enabled at once, as a starting point to trim down:
   (clatter-image-enable t)                ; inline images (GUI frames only)
   (clatter-rawlog-enabled t)              ; raw protocol inspector buffers
   ;; Tweaks to the on-by-default features.
-  (clatter-track-in-buffer-mode-line t)   ; activity crumbs in every buffer
+  (clatter-track-show-in-clatter-buffers t) ; activity crumbs in every buffer
   (clatter-notify-keywords '("emacs" "lisp"))
   (clatter-notify-rules '((:target "#emacs" :level mentions :schedule (9 . 22))
                           (:target "#bots"  :level none)))

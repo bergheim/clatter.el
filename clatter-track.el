@@ -144,8 +144,11 @@ removes the item from the global format immediately."
          (when (fboundp 'clatter-track--sync-global-mode-line)
            (clatter-track--sync-global-mode-line))))
 
-(defcustom clatter-track-in-buffer-mode-line nil
-  "Show the activity crumbs in each clatter buffer's own mode line.
+(define-obsolete-variable-alias 'clatter-track-in-buffer-mode-line
+  'clatter-track-show-in-clatter-buffers "0.9.0")
+
+(defcustom clatter-track-show-in-clatter-buffers nil
+  "Show activity crumbs in each clatter buffer's own mode line.
 By default the track indicator is appended to the global
 `mode-line-format', which clatter buffers override with their own
 buffer-local mode line, so the crumbs are not visible while you are in a
@@ -499,12 +502,12 @@ not already present; removes it when the option is nil.  Used both when
 
 (defun clatter-track--refresh-mode-lines ()
   "Add or remove the track item in all clatter buffers' mode lines.
-The presence of the item follows `clatter-track-in-buffer-mode-line'."
+The presence of the item follows `clatter-track-show-in-clatter-buffers'."
   (dolist (buf (buffer-list))
     (with-current-buffer buf
       (when (derived-mode-p 'clatter-mode)
         (setq-local mode-line-format
-                    (if clatter-track-in-buffer-mode-line
+                    (if clatter-track-show-in-clatter-buffers
                         (clatter-track--insert-mode-line-item mode-line-format)
                       (delq 'clatter-track-mode-line-item
                             (copy-sequence mode-line-format))))

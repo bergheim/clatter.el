@@ -783,7 +783,7 @@ argument to refresh faces already in use).
 | =clatter-track-count-style=      | ='suffix=       | =suffix=, =superscript=, =subscript=, =glyph=, =none=    |
 | =clatter-track-indicators=       | =@= / =*= / (none) | Prefix glyph for mention / DM / activity       |
 | =clatter-track-faces-alist=      | (4 faces)      | Face per activity type                         |
-| =clatter-track-in-buffer-mode-line= | =nil=       | Also show crumbs in each clatter buffer        |
+| =clatter-track-show-in-clatter-buffers= | =nil=       | Also show crumbs in each clatter buffer        |
 | =clatter-track-global-mode-line= | =t=          | Append crumbs to the global mode line (set =nil= with a custom modeline) |
 | =clatter-track-switch-return-to-origin= | =t=    | =clatter-track-switch= returns to the start buffer when exhausted |
 

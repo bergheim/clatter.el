@@ -296,7 +296,12 @@ so a small `clatter-track-shorten' value must not truncate the Buffer column."
                 (should (null clatter-track--switch-origin)))
             (kill-buffer origin)))))))
 
-;; --- Mode-line item duplication ---
+;; --- Mode-line integration ---
+
+(ert-deftest clatter-track-old-buffer-mode-line-option-is-an-alias ()
+  "The old option name remains compatible with existing configurations."
+  (should (eq (indirect-variable 'clatter-track-in-buffer-mode-line)
+              'clatter-track-show-in-clatter-buffers)))
 
 (ert-deftest clatter-track-mode-line-item-present-p-finds-nested-item ()
   "A track item nested inside another construct counts as present."

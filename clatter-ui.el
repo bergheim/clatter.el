@@ -1891,7 +1891,7 @@ connected (the common case) or absent."
               #'clatter--refresh-compact-system-layout nil t)
     (clatter--setup-prompt buffer)
     ;; Add mode-line.  Optionally include the activity crumbs (see
-    ;; `clatter-track-in-buffer-mode-line') so they are visible while
+    ;; `clatter-track-show-in-clatter-buffers') so they are visible while
     ;; inside a clatter buffer, not just in the global mode line.
     (setq-local mode-line-format
                 (append
@@ -1899,8 +1899,8 @@ connected (the common case) or absent."
                    (list " " 'mode-line-buffer-identification))
                  (list clatter-mode-line-format
                        '(:eval (clatter--typing-mode-line)))
-                 (when (and (boundp 'clatter-track-in-buffer-mode-line)
-                            clatter-track-in-buffer-mode-line)
+                 (when (and (boundp 'clatter-track-show-in-clatter-buffers)
+                            clatter-track-show-in-clatter-buffers)
                    (list 'clatter-track-mode-line-item))
                  (list " " 'mode-line-end-spaces)))
     (setq-local header-line-format (clatter--effective-header-line-format))
