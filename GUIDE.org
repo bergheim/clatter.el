@@ -970,6 +970,51 @@ for nicks and a description for commands.
 
 Toggle with =M-x clatter-nicklist-toggle=. An open list follows the selected channel.
 
+** Unified buffer
+
+=*clatter-unified*= is a single chronological inbox showing live traffic from
+every channel and query across all networks, rendered like a normal chat
+buffer: sender colors, mentions, nick-column grouping, mIRC formatting and
+timestamps all behave the same. (Nicks inside message text are not
+highlighted — that keys off a channel's member list, which the inbox has
+none of.)
+
+| Variable                 | Default | Description                             |
+|--------------------------+---------+-----------------------------------------|
+| =clatter-unified-enabled=  | =nil=     | Capture live messages into the inbox    |
+
+Set it before calling =clatter-setup=, which is what installs the capture hooks:
+
+#+begin_src emacs-lisp
+(setq clatter-unified-enabled t)
+(clatter-setup)
+#+end_src
+
+Open the buffer with =M-x clatter-unified=. It is created on first use —
+by the first captured message, or by the command itself.
+
+| Key | Action                                    |
+|-----+-------------------------------------------|
+| =RET= | Visit the message in its source buffer    |
+| =q=   | Quit window                               |
+
+Behavior notes:
+
+- Live traffic only. Batched messages, which is how CHATHISTORY backlog and
+  bouncer replay arrive, never reach the inbox, so a reconnect does not flood
+  it. The buffer starts from the moment you connect.
+- A separator line =── network/channel ──= is inserted whenever the source
+  changes, so message lines stay narrow and a burst from one nick still
+  collapses into a single nick column within its own channel run.
+- Muted senders and fools are hidden exactly as they are in channel buffers,
+  and =clatter-toggle-fools= reveals them here too.
+- The buffer is read-only and has no prompt: it is for reading and jumping,
+  not for sending. =RET= takes you to the real buffer to reply.
+- It is memory-bounded by =clatter-buffer-max-lines= like any other buffer, and
+  it is invisible to activity tracking, so nothing is counted twice.
+- Deriving from =clatter-mode= runs =clatter-mode-hook=, so your own hook
+  functions run in this buffer with no network or target set.
+
 ** mIRC Formatting
 
 | Variable                  | Default | Description                       |
@@ -1061,6 +1106,7 @@ explicit call from your configuration.
 | =clatter-smart.el=         | Adaptive noise filtering                      | =clatter-smart-enabled= (on)          |
 | =clatter-pals.el=          | Pals, fools and visibility                    | =clatter-pals= / =clatter-fools=        |
 | =clatter-nicklist.el=      | Channel member sidebar                        | =clatter-nicklist-toggle=             |
+| =clatter-unified.el=       | Cross-network unified inbox buffer            | =clatter-unified-enabled= (off)       |
 | =clatter-list.el=          | Channel list browser                          | =/list=                               |
 | =clatter-track.el=         | Mode-line activity tracking                   | =clatter-track-enabled= (on)          |
 | =clatter-notify.el=        | Desktop notifications                         | =clatter-notify-enabled= (on)         |
