@@ -11,15 +11,16 @@
 
 (defun clatter-test-unified--buffer ()
   "Return the live unified buffer, or nil."
-  (let ((buf (get-buffer clatter-unified--buffer-name)))
-    (and (buffer-live-p buf) buf)))
+  (when-let* ((buf (get-buffer clatter-unified--buffer-name))
+              ((buffer-live-p buf)))
+    buf))
 
 (defun clatter-test-unified--kill-buffer ()
   "Kill the unified buffer if it exists."
-  (let ((buf (get-buffer clatter-unified--buffer-name)))
-    (when (buffer-live-p buf)
-      (let ((kill-buffer-query-functions nil))
-        (kill-buffer buf)))))
+  (when-let* ((buf (get-buffer clatter-unified--buffer-name))
+              ((buffer-live-p buf)))
+    (let ((kill-buffer-query-functions nil))
+      (kill-buffer buf))))
 
 (defmacro clatter-test-unified--with-capture (conn &rest body)
   "Run BODY with CONN bound to a mock connection, then clean up.
