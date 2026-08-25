@@ -979,9 +979,10 @@ timestamps all behave the same. (Nicks inside message text are not
 highlighted — that keys off a channel's member list, which the inbox has
 none of.)
 
-| Variable                 | Default | Description                             |
-|--------------------------+---------+-----------------------------------------|
-| =clatter-unified-enabled=  | =nil=     | Capture live messages into the inbox    |
+| Variable                    | Default | Description                             |
+|-----------------------------+---------+-----------------------------------------|
+| =clatter-unified-enabled=     | =nil=     | Capture live messages into the inbox    |
+| =clatter-unified-autoscroll=  | =t=       | Follow new messages when at the bottom  |
 
 Set it before calling =clatter-setup=, which is what installs the capture hooks:
 
