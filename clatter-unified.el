@@ -96,14 +96,21 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
          (buf (clatter-unified--buffer))
          (last (buffer-local-value 'clatter-unified--last-source buf))
          ;; Note who is tailing the buffer before inserting: windows (and
-         ;; the buffer point) at end-of-buffer follow the new message,
-         ;; anyone scrolled back stays put.
-         (end (with-current-buffer buf (point-max)))
+         ;; the buffer point) at the bottom follow the new message, anyone
+         ;; scrolled back stays put.  "At the bottom" is anywhere on the
+         ;; last message line, not just point-max: evil's normal state
+         ;; never rests point at point-max.
+         (tail-floor (with-current-buffer buf
+                       (save-excursion
+                         (goto-char (point-max))
+                         (forward-line -1)
+                         (point))))
          (tailing (when clatter-unified-autoscroll
-                    (seq-filter (lambda (w) (= (window-point w) end))
+                    (seq-filter (lambda (w) (>= (window-point w) tail-floor))
                                 (get-buffer-window-list buf nil t))))
          (point-tailing (and clatter-unified-autoscroll
-                             (with-current-buffer buf (= (point) end)))))
+                             (with-current-buffer buf
+                               (>= (point) tail-floor)))))
     (unless (and last
                  (equal (car last) network)
                  (string-equal-ignore-case (cdr last) buf-target))

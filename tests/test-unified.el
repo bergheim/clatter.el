@@ -443,6 +443,28 @@ Regression: the buffer is oldest-first regardless of the user's global
         (should (= (window-point (selected-window))
                    (with-current-buffer buf (point-max))))))))
 
+(ert-deftest clatter-test-unified-autoscroll-follows-on-last-line ()
+  "Point at the beginning of the last message line counts as tailing.
+Evil's normal state never rests point at point-max, so bottom detection
+must accept anywhere on the last line."
+  (clatter-test-unified--with-capture conn
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "first" nil)
+    (let ((buf (clatter-test-unified--buffer)))
+      (save-window-excursion
+        (set-window-buffer (selected-window) buf)
+        ;; Land on the last message line's bol, the way evil G does.
+        (set-window-point (selected-window)
+                          (with-current-buffer buf
+                            (save-excursion
+                              (goto-char (point-max))
+                              (forward-line -1)
+                              (point))))
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "second" nil)
+        (should (= (window-point (selected-window))
+                   (with-current-buffer buf (point-max))))))))
+
 (ert-deftest clatter-test-unified-autoscroll-leaves-scrolled-back-window ()
   "A window scrolled away from the bottom stays where it is."
   (clatter-test-unified--with-capture conn
