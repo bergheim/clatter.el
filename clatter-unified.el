@@ -100,15 +100,16 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
          ;; scrolled back stays put.  "At the bottom" is anywhere on the
          ;; last message line, not just point-max: evil's normal state
          ;; never rests point at point-max.
-         (tail-floor (with-current-buffer buf
-                       (save-excursion
-                         (goto-char (point-max))
-                         (forward-line -1)
-                         (point))))
-         (tailing (when clatter-unified-autoscroll
+         (tail-floor (when clatter-unified-autoscroll
+                       (with-current-buffer buf
+                         (save-excursion
+                           (goto-char (point-max))
+                           (forward-line -1)
+                           (point)))))
+         (tailing (when tail-floor
                     (seq-filter (lambda (w) (>= (window-point w) tail-floor))
                                 (get-buffer-window-list buf nil t))))
-         (point-tailing (and clatter-unified-autoscroll
+         (point-tailing (and tail-floor
                              (with-current-buffer buf
                                (>= (point) tail-floor)))))
     (unless (and last
@@ -130,13 +131,12 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
                               server-time invisible
                               (list 'clatter-unified-network network
                                     'clatter-unified-target buf-target)))
-    ;; Hidden messages must not claim the source context: the next visible
-    ;; message still needs its own separator, or it would sit under a
-    ;; separator the reader cannot see.
-    (unless invisible
-      (with-current-buffer buf
-        (setq clatter-unified--last-source (cons network buf-target))))
     (with-current-buffer buf
+      ;; Hidden messages must not claim the source context: the next
+      ;; visible message still needs its own separator, or it would sit
+      ;; under a separator the reader cannot see.
+      (unless invisible
+        (setq clatter-unified--last-source (cons network buf-target)))
       (when point-tailing
         (goto-char (point-max)))
       (dolist (w tailing)
@@ -205,8 +205,7 @@ the one nearest SERVER-TIME, else the newest."
       ;; source has truncated away errors out instead of leaving the user
       ;; at an arbitrary point.  A stale msgid falls through to the
       ;; sender+text match.
-      (let ((pos (or (and msgid
-                          (clatter--find-message-position-by-msgid buf msgid))
+      (let ((pos (or (clatter--find-message-position-by-msgid buf msgid)
                      (clatter-unified--find-message buf sender text
                                                     server-time))))
         (unless pos
