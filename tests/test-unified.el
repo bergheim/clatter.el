@@ -134,7 +134,15 @@ unregisters the unified hooks whether or not BODY enabled them."
           (should (equal (get-text-property bol 'clatter-unified-target)
                          "#emacs"))
           (should (equal (get-text-property bol 'clatter-sender) "alice"))
-          (should (eq (get-text-property bol 'clatter-msg-type) 'privmsg)))))))
+          (should (eq (get-text-property bol 'clatter-msg-type) 'privmsg))))
+      ;; The sender in the nick column is nick-face colored.
+      (with-current-buffer buf
+        (goto-char (point-min))
+        (should (search-forward "<alice>" nil t))
+        (let ((nick-pos (- (point) 6)))
+          (should (memq (clatter-hl-nick-face "alice" conn)
+                        (ensure-list
+                         (get-text-property nick-pos 'face)))))))))
 
 (ert-deftest clatter-test-unified-action-renders ()
   "A CTCP ACTION renders with action formatting and its source props."
@@ -251,7 +259,9 @@ unregisters the unified hooks whether or not BODY enabled them."
                                                       'face))))))))
 
 (ert-deftest clatter-test-unified-muted-sender-line-is-invisible ()
-  "A muted sender's captured line carries the invisibility category."
+  "A fool's captured line is actually hidden, not merely propertied.
+The mode must seed `buffer-invisibility-spec' itself: the unified buffer
+never goes through `clatter-ui-setup-buffer'."
   (let ((clatter-fools '("troll")))
     (clatter-test-unified--with-capture conn
       (clatter-unified--on-privmsg conn '("troll" "user" "host") "#emacs"
@@ -263,7 +273,60 @@ unregisters the unified hooks whether or not BODY enabled them."
         (with-current-buffer buf
           (let ((invisible (get-text-property bol 'invisible)))
             (should invisible)
-            (should (memq 'clatter-fool (ensure-list invisible)))))))))
+            (should (memq 'clatter-fool (ensure-list invisible))))
+          (should (memq 'clatter-fool buffer-invisibility-spec))
+          (should (memq 'muted buffer-invisibility-spec))
+          (should (invisible-p bol)))))))
+
+(ert-deftest clatter-test-unified-ignored-sender-uses-muted-category ()
+  "An ignore-list sender's line is hidden under the `muted' category."
+  ;; Ignore patterns match the full nick!user@host prefix.
+  (let ((clatter-ignore-list '("troll!*")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("troll" "user" "host") "#emacs"
+                                   "bait" nil)
+      (let* ((buf (clatter-test-unified--buffer))
+             (bol (and buf (clatter-test-unified--line-bol buf "bait"))))
+        (should buf)
+        (should bol)
+        (with-current-buffer buf
+          (should (memq 'muted (ensure-list (get-text-property bol 'invisible))))
+          (should (invisible-p bol)))))))
+
+(ert-deftest clatter-test-unified-hidden-sender-separator-is-hidden ()
+  "A hidden sender's separator is hidden too, and does not claim the source.
+The next visible message from that channel still gets a visible separator."
+  (let ((clatter-fools '("troll")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#alpha"
+                                   "hi" nil)
+      (clatter-unified--on-privmsg conn '("troll" "user" "host") "#beta"
+                                   "bait" nil)
+      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#beta"
+                                   "real talk" nil)
+      (let ((buf (clatter-test-unified--buffer)))
+        (should (= 2 (clatter-test-unified--count buf "──[^\n]*testnet/#beta")))
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (re-search-forward "──[^\n]*testnet/#beta")
+          (should (invisible-p (match-beginning 0)))
+          (re-search-forward "──[^\n]*testnet/#beta")
+          (should-not (invisible-p (match-beginning 0))))))))
+
+(ert-deftest clatter-test-unified-image-scan-suppressed ()
+  "Capture never re-scans message text for inline images.
+The source channel buffer already scanned; a second scan would fetch
+every URL twice."
+  (let ((calls 0))
+    (cl-letf (((symbol-function 'clatter-image--scan-message)
+               (lambda (&rest _) (cl-incf calls))))
+      (clatter-test-unified--with-capture conn
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "look https://example.com/cat.png" nil)
+        (should (string-match-p
+                 "cat\\.png" (clatter-test-unified--string
+                              (clatter-test-unified--buffer))))
+        (should (= calls 0))))))
 
 ;;; Buffer properties
 
@@ -362,6 +425,82 @@ Regression: the buffer is oldest-first regardless of the user's global
         (with-current-buffer unified
           (goto-char (clatter-test-unified--line-bol unified "orphan"))
           (should-error (clatter-unified-visit) :type 'user-error))))))
+
+(ert-deftest clatter-test-unified-visit-falls-back-without-msgid ()
+  "Without a msgid, RET matches the message by sender and text."
+  (clatter-test-unified--with-capture conn
+    (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs"
+                            "findme" nil)
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "findme" nil)
+    (let ((chan (clatter-get-buffer "testnet" "#emacs"))
+          (unified (clatter-test-unified--buffer)))
+      (save-window-excursion
+        (with-current-buffer unified
+          (goto-char (clatter-test-unified--line-bol unified "findme"))
+          (should-not (get-text-property (point) 'clatter-msgid))
+          (clatter-unified-visit)
+          (should (eq (current-buffer) chan))))
+      (with-current-buffer chan
+        (should (equal (get-text-property (point) 'clatter-text) "findme"))))))
+
+(ert-deftest clatter-test-unified-visit-stale-msgid-falls-back-to-text ()
+  "A msgid the source buffer no longer has falls back to the text match."
+  (clatter-test-unified--with-capture conn
+    ;; The channel line has no msgid; the unified line carries a stale one.
+    (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs"
+                            "stale" nil)
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 (propertize "stale" 'clatter-msgid "gone-1")
+                                 nil)
+    (let ((chan (clatter-get-buffer "testnet" "#emacs"))
+          (unified (clatter-test-unified--buffer)))
+      (save-window-excursion
+        (with-current-buffer unified
+          (goto-char (clatter-test-unified--line-bol unified "stale"))
+          (should (equal (get-text-property (point) 'clatter-msgid) "gone-1"))
+          (clatter-unified-visit)
+          (should (eq (current-buffer) chan))))
+      (with-current-buffer chan
+        (should (equal (get-text-property (point) 'clatter-text) "stale"))))))
+
+(ert-deftest clatter-test-unified-visit-missing-message-signals-user-error ()
+  "A message the source buffer never had (or truncated) errors out."
+  (clatter-test-unified--with-capture conn
+    ;; The channel buffer exists but never received the message.
+    (clatter-get-or-create-buffer "testnet" "#emacs" 'channel)
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "vanished" nil)
+    (let ((unified (clatter-test-unified--buffer)))
+      (save-window-excursion
+        (with-current-buffer unified
+          (goto-char (clatter-test-unified--line-bol unified "vanished"))
+          (should-error (clatter-unified-visit) :type 'user-error))))))
+
+(ert-deftest clatter-test-unified-fallback-prefers-newest-match ()
+  "With duplicate sender+text and no server-time, the newest match wins.
+Regression: under the default `newest-first' order the newest message is
+at the top of the source buffer, not the bottom."
+  (clatter-test-unified--with-capture conn
+    (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs" "dup" nil)
+    (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs" "dup" nil)
+    (let* ((chan (clatter-get-buffer "testnet" "#emacs"))
+           (matches (with-current-buffer chan
+                      (save-excursion
+                        (goto-char (point-min))
+                        (let (acc)
+                          (while (not (eobp))
+                            (when (equal "dup" (get-text-property
+                                                (point) 'clatter-text))
+                              (push (point) acc))
+                            (forward-line 1))
+                          (nreverse acc))))))
+      (should (= 2 (length matches)))
+      ;; Default order is newest-first: the newest of the two duplicates
+      ;; is the earlier buffer position.
+      (should (eq clatter-message-order 'newest-first))
+      (should (= (clatter-unified--find-message chan "alice" "dup" nil)
+                 (car matches))))))
 
 (provide 'test-unified)
 
