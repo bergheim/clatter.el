@@ -182,7 +182,9 @@ the one nearest SERVER-TIME, else the newest."
                                                     server-time))))
         (unless pos
           (user-error "Message not found in %s" (buffer-name buf)))
-        (pop-to-buffer buf)
+        ;; Keep the inbox window: the jump target opens elsewhere, like a
+        ;; compilation or occur match.
+        (pop-to-buffer buf '(nil (inhibit-same-window . t)))
         (goto-char pos)))))
 
 ;; --- Setup ---
