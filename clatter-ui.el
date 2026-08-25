@@ -175,6 +175,15 @@ any intervening line breaks the group but a time gap alone never does."
                  (number :tag "Seconds"))
   :group 'clatter)
 
+(defcustom clatter-group-messages-gap nil
+  "Vertical space between nick groups when message grouping is enabled.
+An integer specifies pixels; a float specifies a multiple of the default
+frame line height.  nil or a non-positive value disables the gap.  Line
+spacing has no effect on text terminals."
+  :type '(choice (const :tag "No gap" nil)
+                 (number :tag "Line spacing"))
+  :group 'clatter)
+
 ;; --- Message insertion ---
 
 (defvar-local clatter--prompt-marker nil
@@ -624,11 +633,12 @@ column is too narrow to wrap past the nick indent."
          (when (> col floor-col) col)))
       (col (when (and (integerp col) (> col floor-col)) col)))))
 
-(defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible)
+(defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible message-line-spacing)
   "Insert formatted TEXT into BUFFER.
 Adds timestamp unless NO-TIMESTAMP is non-nil.
 MSG-PROPS is an optional plist of extra text properties for the message line.
 TIME is an optional Emacs time value (from IRCv3 server-time) for the timestamp.
+MESSAGE-LINE-SPACING sets spacing below the message's final display line.
 When `clatter-message-order' is `newest-first', messages appear directly below
 the input line with older ones scrolling down.  When `oldest-first', messages
 append at the bottom like a traditional IRC client."
@@ -666,6 +676,9 @@ append at the bottom like a traditional IRC client."
               (when formatted-timestamp
                 (setq clatter--last-formatted-timestamp formatted-timestamp))
               (insert text "\n")
+              (when message-line-spacing
+                (put-text-property (1- (point)) (point)
+                                   'line-spacing message-line-spacing))
               (when-let* ((eff-col (clatter--effective-fill-column buffer)))
                 (when (> eff-col wrap-col)
                   (let ((fill-column eff-col)
@@ -831,6 +844,17 @@ SERVER-TIME overrides the current time for the timestamp."
          ;; break any open burst.
          (grouped-p (and (eq msg-type 'privmsg)
                          (clatter--group-with-previous-p buffer sender server-time)))
+         (group-gap-p
+          (and clatter-group-messages-by-nick
+               (numberp clatter-group-messages-gap)
+               (> clatter-group-messages-gap 0)
+               (not grouped-p)
+               (clatter--previous-message-bol buffer)))
+         ;; The newline below the boundary depends on which side of the
+         ;; previous message receives the new one.
+         (insert-before-previous-p
+          (not (eq (and clatter--insert-at-backlog-end t)
+                   (eq clatter-message-order 'newest-first))))
          (nick-col (cond
                     ((eq 'action msg-type)
                      (clatter--format-nick-column "*" 'clatter-action sender))
@@ -896,7 +920,15 @@ SERVER-TIME overrides the current time for the timestamp."
       (setq props (plist-put props 'clatter-msgid msgid)))
     (when self-echo-nonce
       (setq props (plist-put props 'clatter-self-echo-nonce self-echo-nonce)))
-    (clatter--insert-message buffer formatted nil props server-time invisible)
+    (when (and group-gap-p (not insert-before-previous-p))
+      (with-current-buffer buffer
+        (let ((inhibit-read-only t)
+              (end (clatter--message-insert-position)))
+          (put-text-property (1- end) end
+                             'line-spacing clatter-group-messages-gap))))
+    (clatter--insert-message
+     buffer formatted nil props server-time invisible
+     (and group-gap-p insert-before-previous-p clatter-group-messages-gap))
     (when (and (not clatter--suppress-image-scan)
                (not (clatter-fool-p sender (clatter-connection-network-id conn)))
                (fboundp 'clatter-image--scan-message))

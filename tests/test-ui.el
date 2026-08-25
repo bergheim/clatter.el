@@ -2058,6 +2058,13 @@ last ran a query command."
       (buffer-substring-no-properties
        bol (min (+ bol clatter-nick-column-width) (line-end-position))))))
 
+(defun clatter-test--line-spacing-at (buffer bol)
+  "Return the line-spacing property on the newline after BOL in BUFFER."
+  (with-current-buffer buffer
+    (save-excursion
+      (goto-char bol)
+      (get-text-property (line-end-position) 'line-spacing))))
+
 (defmacro clatter-test--with-grouping-buffer (order conn &rest body)
   "Run BODY in a fresh clatter buffer with nick grouping setup.
 ORDER is the `clatter-message-order', CONN the mock connection."
@@ -2095,6 +2102,31 @@ ORDER is the `clatter-message-order', CONN the mock connection."
               ;; Sender metadata survives on the blanked line.
               (should (equal (get-text-property second-bol 'clatter-sender) "alice"))
               (should (eq (get-text-property second-bol 'clatter-msg-type) 'privmsg)))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-adds-gap-between-groups ()
+  "Nick groups have fractional line spacing between them in either order."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t)
+        (clatter-group-messages-gap 0.25))
+    (unwind-protect
+        (dolist (order '(oldest-first newest-first))
+          (clatter-test--with-grouping-buffer order conn
+            (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+            (clatter-insert-privmsg (current-buffer) "alice" "second" conn)
+            (clatter-insert-privmsg (current-buffer) "bob" "third" conn)
+            (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                  (second-bol (clatter-test--find-line-bol (current-buffer) "second"))
+                  (third-bol (clatter-test--find-line-bol (current-buffer) "third")))
+              (should-not (clatter-test--line-spacing-at
+                           (current-buffer) first-bol))
+              (should (equal (clatter-test--line-spacing-at
+                              (current-buffer)
+                              (if (eq order 'oldest-first) second-bol third-bol))
+                             0.25))
+              (should-not (clatter-test--line-spacing-at
+                           (current-buffer)
+                           (if (eq order 'oldest-first) third-bol second-bol))))))
       (remhash "testnet" clatter-connections))))
 
 (ert-deftest clatter-group-messages-breaks-on-different-nick ()

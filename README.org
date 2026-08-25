@@ -203,6 +203,7 @@ Every optional extra enabled at once, as a starting point to trim down:
                           (:target "#bots"  :level none)))
   (clatter-compact-system-messages 'compact) ; terse joins/parts/quits
   (clatter-group-messages-by-nick t)       ; show a nick once per burst
+  (clatter-group-messages-gap 0.2)          ; slight space between bursts (GUI)
   ;; Fixed typing row keeps activity crumbs from shifting.
   (clatter-typing-indicator-location 'input-separator)
   (clatter-track-shorten 4)                ; e.g. #systemcrafters -> #syst

@@ -713,12 +713,16 @@ instead of repeating it on every line:
 |---------------------------------+---------+------------------------------------------------------------|
 | =clatter-group-messages-by-nick=  | =nil=     | Collapse the nick column on same-nick bursts               |
 | =clatter-group-messages-window=   | =300=     | Seconds within which same-nick lines group; =nil= for adjacency only |
+| =clatter-group-messages-gap=      | =nil=     | Extra spacing between groups: pixels (integer) or line-height multiple (float) |
 
 Only the chronologically-first message of a burst shows the nick; later
 same-nick PRIVMSGs within the window render a blank column that still
 carries the sender metadata for navigation and highlighting. A burst is
 broken by a message from another nick, an action, a notice, or a gap
 larger than the window. Actions and notices are never themselves grouped.
+Set =clatter-group-messages-gap= to =0.2= for a subtle one-fifth-line gap.
+Line spacing works on graphical displays only; =nil= or a non-positive value
+disables it.
 
 ** Input
 
