@@ -942,7 +942,7 @@ for nicks and a description for commands.
 | =clatter-nicklist-width= | =20=       | Sidebar width              |
 | =clatter-nicklist-side=  | ='right=  | Which side (left or right) |
 
-Toggle per buffer with =M-x clatter-nicklist-toggle=.
+Toggle with =M-x clatter-nicklist-toggle=. An open list follows the selected channel.
 
 ** mIRC Formatting
 
