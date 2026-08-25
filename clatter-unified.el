@@ -30,6 +30,14 @@
   :type 'boolean
   :group 'clatter)
 
+(defcustom clatter-unified-autoscroll t
+  "When non-nil, follow new messages while at the bottom of the inbox.
+Windows (and the buffer's point) sitting at the end of the unified
+buffer advance with each new message; anywhere else they stay put, so
+scrolling back to read is never interrupted."
+  :type 'boolean
+  :group 'clatter)
+
 (defconst clatter-unified--buffer-name "*clatter-unified*"
   "Name of the unified inbox buffer.")
 
@@ -86,7 +94,16 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
                            sender-nick target)))
          (invisible (clatter-sender-invisibility sender network))
          (buf (clatter-unified--buffer))
-         (last (buffer-local-value 'clatter-unified--last-source buf)))
+         (last (buffer-local-value 'clatter-unified--last-source buf))
+         ;; Note who is tailing the buffer before inserting: windows (and
+         ;; the buffer point) at end-of-buffer follow the new message,
+         ;; anyone scrolled back stays put.
+         (end (with-current-buffer buf (point-max)))
+         (tailing (when clatter-unified-autoscroll
+                    (seq-filter (lambda (w) (= (window-point w) end))
+                                (get-buffer-window-list buf nil t))))
+         (point-tailing (and clatter-unified-autoscroll
+                             (with-current-buffer buf (= (point) end)))))
     (unless (and last
                  (equal (car last) network)
                  (string-equal-ignore-case (cdr last) buf-target))
@@ -111,7 +128,12 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
     ;; separator the reader cannot see.
     (unless invisible
       (with-current-buffer buf
-        (setq clatter-unified--last-source (cons network buf-target))))))
+        (setq clatter-unified--last-source (cons network buf-target))))
+    (with-current-buffer buf
+      (when point-tailing
+        (goto-char (point-max)))
+      (dolist (w tailing)
+        (set-window-point w (point-max))))))
 
 (defun clatter-unified--on-privmsg (conn sender target text server-time)
   "Capture SENDER's PRIVMSG TEXT to TARGET on CONN at SERVER-TIME."

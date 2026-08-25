@@ -426,6 +426,61 @@ Regression: the buffer is oldest-first regardless of the user's global
           (goto-char (clatter-test-unified--line-bol unified "orphan"))
           (should-error (clatter-unified-visit) :type 'user-error))))))
 
+;;; Autoscroll
+
+(ert-deftest clatter-test-unified-autoscroll-follows-at-bottom ()
+  "A window sitting at end-of-buffer advances with each new message."
+  (clatter-test-unified--with-capture conn
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "first" nil)
+    (let ((buf (clatter-test-unified--buffer)))
+      (save-window-excursion
+        (set-window-buffer (selected-window) buf)
+        (set-window-point (selected-window) (with-current-buffer buf
+                                              (point-max)))
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "second" nil)
+        (should (= (window-point (selected-window))
+                   (with-current-buffer buf (point-max))))))))
+
+(ert-deftest clatter-test-unified-autoscroll-leaves-scrolled-back-window ()
+  "A window scrolled away from the bottom stays where it is."
+  (clatter-test-unified--with-capture conn
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "first" nil)
+    (let ((buf (clatter-test-unified--buffer)))
+      (save-window-excursion
+        (set-window-buffer (selected-window) buf)
+        (set-window-point (selected-window) (point-min))
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "second" nil)
+        (should (= (window-point (selected-window)) (point-min)))))))
+
+(ert-deftest clatter-test-unified-autoscroll-disabled-stays-put ()
+  "With `clatter-unified-autoscroll' nil, even a bottom window stays."
+  (let ((clatter-unified-autoscroll nil))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                   "first" nil)
+      (let* ((buf (clatter-test-unified--buffer))
+             (end (with-current-buffer buf (point-max))))
+        (save-window-excursion
+          (set-window-buffer (selected-window) buf)
+          (set-window-point (selected-window) end)
+          (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                       "second" nil)
+          (should (= (window-point (selected-window)) end))
+          (should (< end (with-current-buffer buf (point-max)))))))))
+
+(ert-deftest clatter-test-unified-autoscroll-buffer-point-follows ()
+  "With no window, the buffer point tails so the first view shows the newest."
+  (clatter-test-unified--with-capture conn
+    (dotimes (i 3)
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                   (format "msg-%d" i) nil))
+    (with-current-buffer (clatter-test-unified--buffer)
+      (should (= (point) (point-max))))))
+
 (ert-deftest clatter-test-unified-visit-falls-back-without-msgid ()
   "Without a msgid, RET matches the message by sender and text."
   (clatter-test-unified--with-capture conn
