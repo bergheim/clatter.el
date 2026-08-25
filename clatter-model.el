@@ -483,7 +483,10 @@ Installed buffer-locally on `kill-buffer-hook' by `clatter-mode'."
        (>= (point) (marker-position clatter--input-marker))
        (<= (point) (if (eq clatter-message-order 'oldest-first)
                        (point-max)
-                     (1- (marker-position clatter--messages-marker))))))
+                     (if (and (boundp 'clatter--typing-indicator-overlay)
+                              (overlayp clatter--typing-indicator-overlay))
+                         (1- (overlay-start clatter--typing-indicator-overlay))
+                       (1- (marker-position clatter--messages-marker)))))))
 
 (provide 'clatter-model)
 

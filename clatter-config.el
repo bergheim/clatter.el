@@ -465,6 +465,17 @@ message text.  Prompts wider than the nick column are never truncated."
                  (const :tag "Right-align with nick column" right))
   :group 'clatter)
 
+(defcustom clatter-typing-indicator-location 'mode-line
+  "Where to display incoming typing indicators in new Clatter buffers.
+`mode-line' preserves the historical mode-line indicator.
+`input-separator' reserves a blank row between the input and messages in
+channel and query buffers, then displays typing status there.  Configure
+this before a buffer's UI is initialized; changing it does not relayout
+existing buffers."
+  :type '(choice (const :tag "Mode line" mode-line)
+                 (const :tag "Between input and messages" input-separator))
+  :group 'clatter)
+
 (defcustom clatter-header-line-preset nil
   "Preset that moves channel context into the header line.
 When nil, Clatter leaves the header line disabled and preserves the normal
@@ -473,7 +484,8 @@ from the mode-line.  `context' shows the network/target, channel modes,
 member count, and full topic in the header line, leaving only the current
 nick in the mode-line.
 
-Typing and activity indicators remain in the mode-line for every preset."
+Activity remains in the mode-line.  Typing follows
+`clatter-typing-indicator-location'."
   :type '(choice (const :tag "Disabled" nil)
                  (const :tag "Topic" topic)
                  (const :tag "Full channel context" context))

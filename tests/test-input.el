@@ -19,6 +19,7 @@
      (with-temp-buffer
        (clatter-mode)
        (setq-local clatter--target "#test")
+       (setq-local clatter--buffer-type 'channel)
        (clatter--setup-prompt (current-buffer))
        ,@body)))
 
@@ -36,6 +37,7 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
            (with-current-buffer buffer
              (clatter-mode)
              (setq-local clatter--target "#test")
+             (setq-local clatter--buffer-type 'channel)
              (clatter--setup-prompt buffer)
              (clatter--refresh-input-spacers buffer)
              ,@body))
@@ -66,6 +68,11 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
   "Return the current prompt without text properties."
   (buffer-substring-no-properties clatter--prompt-marker
                                   clatter--input-marker))
+
+(defun clatter-input-test--typing-text ()
+  "Return the typing separator overlay's displayed text."
+  (and (overlayp clatter--typing-indicator-overlay)
+       (overlay-get clatter--typing-indicator-overlay 'before-string)))
 
 (defun clatter-input-test--spacer-lines (window)
   "Return the number of protected layout lines available to WINDOW."
@@ -399,6 +406,91 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
     (should (string-match-p
              "#test>.*\nsecond\nfirst\n"
              (buffer-substring-no-properties (point-min) (point-max))))))
+
+(ert-deftest clatter-input-typing-separator-reserves-row-in-both-orders ()
+  "The input-separator placement keeps one blank row beside the prompt."
+  (let ((clatter-typing-indicator-location 'input-separator))
+    (dolist (order '(oldest-first newest-first))
+      (clatter-input-test--with order
+        (should (overlayp clatter--typing-indicator-overlay))
+        (should (get-text-property (overlay-start clatter--typing-indicator-overlay)
+                                   'clatter-typing-indicator-line))
+        (should-not (clatter-input-test--typing-text))
+        (clatter--insert-message (current-buffer) "first" t)
+        (clatter--insert-message (current-buffer) "second" t)
+        (let ((rendered (buffer-substring-no-properties (point-min) (point-max))))
+          (should
+           (string-match-p
+            (if (eq order 'oldest-first)
+                "first\nsecond\n\n *#test>"
+              "#test>.*\n\nsecond\nfirst\n")
+            rendered)))))))
+
+(ert-deftest clatter-input-typing-refresh-preserves-draft-and-undo ()
+  "Typing display changes never alter draft text, prompt, or undo positions."
+  (let ((clatter-typing-indicator-location 'input-separator))
+    (dolist (order '(oldest-first newest-first))
+      (clatter-input-test--with order
+        (buffer-enable-undo)
+        (goto-char (clatter--input-end))
+        (setq buffer-undo-list nil)
+        (insert "draft")
+        (let ((prompt (clatter-input-test--prompt))
+              (text (buffer-string)))
+          (setq-local clatter--typing-nicks (make-hash-table :test 'equal))
+          (puthash "alice" t clatter--typing-nicks)
+          (clatter--refresh-typing-indicator)
+          (should (equal (buffer-string) text))
+          (should (equal (clatter--get-input) "draft"))
+          (should (equal (clatter-input-test--prompt) prompt))
+          (should (= (field-end clatter--input-marker) (clatter--input-end)))
+          (primitive-undo 1 buffer-undo-list)
+          (should (equal (clatter--get-input) ""))
+          (clatter--set-input "draft")
+          (clatter--refresh-prompt)
+          (should (equal (clatter--get-input) "draft"))
+          (should (overlayp clatter--typing-indicator-overlay)))))))
+
+(ert-deftest clatter-input-typing-separator-bottom-pin-reserves-one-row ()
+  "Oldest-first bottom pin accounts for the fixed typing row."
+  (let ((clatter-typing-indicator-location 'input-separator))
+    (clatter-input-test--with-window 'oldest-first
+      (let ((height (window-body-height window)))
+        (should (> height 3))
+        (should (= (clatter-input-test--spacer-lines window)
+                   (- height 2)))
+        (clatter--insert-message buffer "first" t)
+        (should (= (count-screen-lines (window-start window)
+                                       (point-max) nil window)
+                   height))))))
+
+(ert-deftest clatter-input-clear-preserves-typing-separator ()
+  "/clear removes history but retains the typing row and prompt."
+  (let ((clatter-typing-indicator-location 'input-separator))
+    (clatter-input-test--with 'oldest-first
+      (clatter--insert-message (current-buffer) "message" t)
+      (let ((overlay clatter--typing-indicator-overlay))
+        (clatter-cmd-clear nil)
+        (should (eq overlay clatter--typing-indicator-overlay))
+        (should (overlay-buffer overlay))
+        (should (equal (buffer-string) "\n#test> "))))))
+
+(ert-deftest clatter-input-truncation-preserves-typing-separator ()
+  "History limits count messages only and never delete the typing row."
+  (let ((clatter-typing-indicator-location 'input-separator)
+        (clatter-buffer-max-lines 2))
+    (dolist (order '(oldest-first newest-first))
+      (clatter-input-test--with order
+        (dolist (text '("message-1" "message-2" "message-3" "message-4"))
+          (clatter--insert-message (current-buffer) text t))
+        (let ((rendered (buffer-string)))
+          (should-not (string-match-p "message-[12]" rendered))
+          (should (string-match-p "message-3" rendered))
+          (should (string-match-p "message-4" rendered))
+          (should (overlay-buffer clatter--typing-indicator-overlay))
+          (should (get-text-property
+                   (overlay-start clatter--typing-indicator-overlay)
+                   'clatter-typing-indicator-line)))))))
 
 (ert-deftest clatter-input-get-and-clear-oldest ()
   "Input get/clear work with a bottom prompt, even after messages arrive."

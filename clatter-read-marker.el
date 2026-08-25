@@ -96,7 +96,7 @@ PARAMS format: (target timestamp=TIMESTAMP)"
       (if (eq clatter-message-order 'oldest-first)
           ;; In oldest-first, unread messages are at the bottom
           (progn
-            (goto-char (point-max))
+            (goto-char (or clatter--messages-marker (point-max)))
             (forward-line (- clatter--unread-count)))
         ;; In newest-first, unread messages are at the top (after prompt)
         (goto-char (or clatter--messages-marker (point-min)))

@@ -485,7 +485,7 @@ Bare nicks are wildcarded to nick!*@*.  LABEL is used in usage messages."
   (let ((inhibit-read-only t))
     (when (and clatter--prompt-marker clatter--messages-marker)
       (if (eq clatter-message-order 'oldest-first)
-          (delete-region (point-min) clatter--prompt-marker)
+          (delete-region (point-min) clatter--messages-marker)
         (delete-region clatter--messages-marker (point-max))))
     (clatter--end-compact-system-group)))
 

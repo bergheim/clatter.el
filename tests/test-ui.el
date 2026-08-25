@@ -1634,7 +1634,106 @@ Both message orders keep the page's own messages in display order."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
-;; --- Typing mode-line ---
+;; --- Typing indicators ---
+
+(ert-deftest clatter-test-typing-location-default-keeps-mode-line-layout ()
+  "The default keeps typing and configured activity in the mode line."
+  (let ((clatter-typing-indicator-location 'mode-line)
+        (clatter-track-show-in-clatter-buffers t))
+    (with-temp-buffer
+      (clatter-mode)
+      (setq-local clatter--network "testnet")
+      (setq-local clatter--target "#emacs")
+      (setq-local clatter--buffer-type 'channel)
+      (clatter-ui-setup-buffer (current-buffer))
+      (should (member '(:eval (clatter--typing-mode-line)) mode-line-format))
+      (should (memq 'clatter-track-mode-line-item mode-line-format))
+      (should-not clatter--typing-indicator-overlay))))
+
+(ert-deftest clatter-test-typing-location-separator-leaves-track-fixed ()
+  "The separator placement omits typing from the mode line, not activity."
+  (let ((clatter-typing-indicator-location 'input-separator)
+        (clatter-track-show-in-clatter-buffers t))
+    (with-temp-buffer
+      (clatter-mode)
+      (setq-local clatter--network "testnet")
+      (setq-local clatter--target "#emacs")
+      (setq-local clatter--buffer-type 'channel)
+      (clatter-ui-setup-buffer (current-buffer))
+      (should-not (member '(:eval (clatter--typing-mode-line)) mode-line-format))
+      (should (memq 'clatter-track-mode-line-item mode-line-format))
+      (should (overlayp clatter--typing-indicator-overlay)))))
+
+(ert-deftest clatter-test-typing-separator-conversation-buffers-only ()
+  "Channels and queries reserve typing rows; server buffers do not."
+  (let ((clatter-typing-indicator-location 'input-separator))
+    (dolist (case '((channel "#emacs" t)
+                    (query "alice" t)
+                    (server "*server*" nil)))
+      (with-temp-buffer
+        (clatter-mode)
+        (setq-local clatter--network "testnet")
+        (setq-local clatter--target (cadr case))
+        (setq-local clatter--buffer-type (car case))
+        (clatter-ui-setup-buffer (current-buffer))
+        (should (eq (and (overlayp clatter--typing-indicator-overlay) t)
+                    (nth 2 case)))))))
+
+(ert-deftest clatter-test-typing-separator-aligns-all-wording ()
+  "One, two, and many typing states align with the message body."
+  (let ((clatter-typing-indicator-location 'input-separator)
+        (clatter-nick-column-width 12))
+    (with-temp-buffer
+      (clatter-mode)
+      (setq-local clatter--target "#emacs")
+      (setq-local clatter--buffer-type 'channel)
+      (clatter--setup-prompt (current-buffer))
+      (setq-local clatter--typing-nicks (make-hash-table :test 'equal))
+      (dolist (case '(("alice is typing" "alice")
+                      ("are typing" "alice" "bob")
+                      ("3 people typing" "alice" "bob" "carol")))
+        (clrhash clatter--typing-nicks)
+        (dolist (nick (cdr case))
+          (puthash nick t clatter--typing-nicks))
+        (clatter--refresh-typing-indicator)
+        (let ((text (overlay-get clatter--typing-indicator-overlay
+                                 'before-string)))
+          (should (string-prefix-p (make-string 13 ?\s) text))
+          (should (string-match-p (car case) text)))))))
+
+(ert-deftest clatter-test-typing-separator-clears-on-done-and-expiry ()
+  "Done and timeout clear separator text without removing its row."
+  (let ((clatter-typing-indicator-location 'input-separator)
+        (conn (clatter-test-make-connection "typing-test" "me"))
+        buffer)
+    (unwind-protect
+        (progn
+          (setq buffer (clatter-get-or-create-buffer
+                        "typing-test" "#chat" 'channel))
+          (with-current-buffer buffer
+            (clatter-ui-setup-buffer buffer))
+          (clatter-ui--on-typing conn '("alice" nil nil) "#chat" "active")
+          (with-current-buffer buffer
+            (should (string-match-p
+                     "alice is typing"
+                     (overlay-get clatter--typing-indicator-overlay
+                                  'before-string))))
+          (clatter-ui--on-typing conn '("alice" nil nil) "#chat" "done")
+          (with-current-buffer buffer
+            (should-not (overlay-get clatter--typing-indicator-overlay
+                                     'before-string))
+            (should (overlay-buffer clatter--typing-indicator-overlay)))
+          (clatter-ui--on-typing conn '("alice" nil nil) "#chat" "paused")
+          (with-current-buffer buffer
+            (cancel-timer (gethash "alice" clatter--typing-nicks)))
+          (clatter--expire-typing-indicator buffer "alice")
+          (with-current-buffer buffer
+            (should-not (overlay-get clatter--typing-indicator-overlay
+                                     'before-string))
+            (should (overlay-buffer clatter--typing-indicator-overlay))))
+      (clatter-test-cleanup)
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (ert-deftest clatter-test-typing-mode-line-empty ()
   "No typing nicks returns nil."
@@ -1968,13 +2067,15 @@ ORDER is the `clatter-message-order', CONN the mock connection."
        (clatter-mode)
        (setq-local clatter--network "testnet")
        (setq-local clatter--target "#test")
+       (setq-local clatter--buffer-type 'channel)
        (clatter-ui-setup-buffer (current-buffer))
        ,@body)))
 
 (ert-deftest clatter-group-messages-blanks-consecutive-same-nick ()
   "A burst of same-nick PRIVMSGs shows the nick once; later lines are blanked."
   (let ((conn (clatter-test-make-connection "testnet" "me"))
-        (clatter-group-messages-by-nick t))
+        (clatter-group-messages-by-nick t)
+        (clatter-typing-indicator-location 'input-separator))
     (unwind-protect
         (dolist (order '(oldest-first newest-first))
           (clatter-test--with-grouping-buffer order conn

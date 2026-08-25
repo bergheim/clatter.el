@@ -722,16 +722,38 @@ larger than the window. Actions and notices are never themselves grouped.
 
 ** Input
 
-| Variable                      | Default   | Description                                        |
-|-------------------------------+-----------+----------------------------------------------------|
-| =clatter-move-to-prompt=        | =t=         | Typing anywhere jumps to the input line first      |
-| =clatter-flyspell-enable=       | =t=         | Flyspell in the input area                         |
-| =clatter-paste-flood-threshold= | =3=         | Lines before a paste-flood confirmation            |
-| =clatter-input-ring-size=       | =1024=      | Input history ring size                            |
-| =clatter-self-echo-mode=        | ='server=  | =server= waits for echo-message; =optimistic= shows at once |
-| =clatter-self-echo-timeout=     | =30=        | Seconds an optimistic echo waits for reconciliation |
-| =clatter-send-typing=           | =t=         | Send outbound typing notifications                 |
-| =clatter-typing-timeout=        | =6=         | Seconds before an incoming typing indicator expires |
+| Variable                                | Default        | Description                                                   |
+|-----------------------------------------+----------------+---------------------------------------------------------------|
+| =clatter-move-to-prompt=                | =t=            | Typing anywhere jumps to the input line first                 |
+| =clatter-flyspell-enable=               | =t=            | Flyspell in the input area                                    |
+| =clatter-paste-flood-threshold=         | =3=            | Lines before a paste-flood confirmation                       |
+| =clatter-input-ring-size=               | =1024=         | Input history ring size                                       |
+| =clatter-self-echo-mode=                | ='server=      | =server= waits for echo-message; =optimistic= shows at once   |
+| =clatter-self-echo-timeout=             | =30=           | Seconds an optimistic echo waits for reconciliation           |
+| =clatter-send-typing=                   | =t=            | Send outbound typing notifications                            |
+| =clatter-typing-timeout=                | =6=            | Seconds before an incoming typing indicator expires           |
+| =clatter-typing-indicator-location=     | ='mode-line=   | =mode-line= or a fixed =input-separator= row                  |
+
+*** Typing indicator placement
+
+=clatter-typing-indicator-location= controls incoming typing status.  It has
+two values:
+
+- =mode-line= (default) keeps the historical =alice is typing...= indicator
+  in the mode line.
+- =input-separator= reserves one blank row between the input and messages in
+  channel and query buffers.  Typing status appears on that row, aligned with
+  message text, so it does not move =clatter-track= or shift message layout.
+  Server buffers do not reserve the row.
+
+#+begin_src emacs-lisp
+(setopt clatter-typing-indicator-location 'input-separator)
+#+end_src
+
+Set the option before Clatter initializes its buffers.  Existing buffers are
+not relaid out; recreate them to apply a new location.  This option changes
+only incoming display.  =clatter-send-typing= still controls outbound typing
+notifications, and =clatter-typing-timeout= still controls incoming expiry.
 
 ** Message Suppression and Filtering
 

@@ -189,6 +189,9 @@ any intervening line breaks the group but a time gap alone never does."
 (defvar-local clatter--input-padding-end nil
   "Marker after protected oldest-first padding and before message history.")
 
+(defvar-local clatter--typing-indicator-overlay nil
+  "Overlay that renders typing status on the reserved separator row.")
+
 (defun clatter--ensure-input-padding (lines)
   "Ensure oldest-first history has at least LINES real blank lines above it.
 Real buffer lines avoid redisplay ambiguities caused by overlay display
@@ -268,8 +271,11 @@ viewport."
                    clatter--input-padding-end)
               (progn
                 (clatter--ensure-input-padding
-                 (max 0 (1- (apply #'max 1
-                                   (mapcar #'window-body-height windows)))))
+                 (max 0 (- (apply #'max 1
+                                  (mapcar #'window-body-height windows))
+                           (if (overlayp clatter--typing-indicator-overlay)
+                               2
+                             1))))
                 (dolist (window windows)
                   (clatter--pin-input-in-window window)))))))))
 
@@ -706,18 +712,27 @@ append at the bottom like a traditional IRC client."
 (defun clatter--maybe-truncate (_buffer)
   "Truncate the current buffer if it exceeds `clatter-buffer-max-lines'.
 Removes oldest messages from the appropriate end of the buffer."
-  (let* ((history-start (if (and (eq clatter-message-order 'oldest-first)
-                                 clatter--input-padding-end)
-                            (marker-position clatter--input-padding-end)
-                          (point-min)))
-         (line-count (count-lines history-start (point-max))))
+  (let* ((oldest-first-p (eq clatter-message-order 'oldest-first))
+         (history-start (if oldest-first-p
+                            (or (and clatter--input-padding-end
+                                     (marker-position clatter--input-padding-end))
+                                (point-min))
+                          (or (and clatter--messages-marker
+                                   (marker-position clatter--messages-marker))
+                              (point-min))))
+         (history-end (if oldest-first-p
+                          (or (and clatter--messages-marker
+                                   (marker-position clatter--messages-marker))
+                              (point-max))
+                        (point-max)))
+         (line-count (count-lines history-start history-end)))
     (when (and clatter-buffer-max-lines
                (> line-count clatter-buffer-max-lines))
       (let ((inhibit-read-only t)
             (target-lines (- line-count
                              clatter-buffer-max-lines)))
         (save-excursion
-          (if (eq clatter-message-order 'oldest-first)
+          (if oldest-first-p
               ;; Preserve protected padding; delete from real history.
               (progn
                 (goto-char history-start)
@@ -726,11 +741,11 @@ Removes oldest messages from the appropriate end of the buffer."
                   (delete-overlay ov))
                 (delete-region history-start (point)))
             ;; Top prompt (newest-first): oldest messages are at the bottom.
-            (goto-char (point-max))
+            (goto-char history-end)
             (forward-line (- target-lines))
-            (dolist (ov (overlays-in (point) (point-max)))
+            (dolist (ov (overlays-in (point) history-end))
               (delete-overlay ov))
-            (delete-region (point) (point-max))))))))
+            (delete-region (point) history-end)))))))
 
 (defun clatter--find-message-position-by-msgid (buffer msgid)
   "Find position of message in BUFFER identified by MSGID."
@@ -1510,6 +1525,23 @@ state."
                       (min input-offset (length input)))))
       (clatter--refresh-input-spacers (current-buffer)))))
 
+(defun clatter--insert-typing-indicator-line ()
+  "Insert and overlay a protected blank typing-indicator row at point."
+  (let ((start (point)))
+    (insert (propertize "\n"
+                        'read-only t
+                        'front-sticky t
+                        'rear-nonsticky t
+                        'field 'clatter-messages
+                        'inhibit-line-move-field-capture t
+                        'clatter-typing-indicator-line t))
+    ;; Messages inserted at START must stay before this row in oldest-first
+    ;; buffers, hence the advancing overlay front.
+    (setq clatter--typing-indicator-overlay
+          (make-overlay start (point) nil t nil))
+    (overlay-put clatter--typing-indicator-overlay
+                 'clatter-typing-indicator t)))
+
 (defun clatter--setup-prompt (buffer)
   "Set up the input prompt in BUFFER.
 For `newest-first' the prompt sits at the top with messages below it.
@@ -1518,7 +1550,10 @@ conventional IRC client, with messages accumulating above it."
   (with-current-buffer buffer
     (let* ((inhibit-read-only t)
            (buffer-undo-list t)
-           (prompt (clatter--propertized-prompt buffer)))
+           (prompt (clatter--propertized-prompt buffer))
+           (typing-row-p
+            (and (eq clatter-typing-indicator-location 'input-separator)
+                 (memq clatter--buffer-type '(channel query)))))
       (setq-local wrap-prefix (make-string (length prompt) ?\s))
       (clatter-input-ring-setup)
       (if (eq clatter-message-order 'oldest-first)
@@ -1527,8 +1562,10 @@ conventional IRC client, with messages accumulating above it."
             (goto-char (point-min))
             (setq clatter--input-padding-end (point-marker))
             (set-marker-insertion-type clatter--input-padding-end nil)
-            ;; Both markers start at the prompt; messages insert here.
+            ;; Messages insert before the optional typing row and prompt.
             (setq clatter--messages-marker (point-marker))
+            (when typing-row-p
+              (clatter--insert-typing-indicator-line))
             (setq clatter--prompt-marker (point-marker))
             (insert prompt)
             (setq clatter--input-marker (point-marker))
@@ -1545,7 +1582,7 @@ conventional IRC client, with messages accumulating above it."
         (insert prompt)
         (setq clatter--input-marker (point-marker))
         (set-marker-insertion-type clatter--input-marker nil)
-        ;; Newline separates input line from messages
+        ;; Newline separates input from the optional typing row and messages.
         (save-excursion
           (goto-char clatter--input-marker)
           (insert (propertize "\n"
@@ -1555,6 +1592,8 @@ conventional IRC client, with messages accumulating above it."
                               'field 'clatter-messages
                               'inhibit-line-move-field-capture t
                               'rear-nonsticky t))
+          (when typing-row-p
+            (clatter--insert-typing-indicator-line))
           (setq clatter--messages-marker (point-marker))
           (set-marker-insertion-type clatter--messages-marker nil)))
       (goto-char clatter--input-marker)
@@ -1568,7 +1607,9 @@ prompt it is just before the newline that separates input from
 messages."
   (if (eq clatter-message-order 'oldest-first)
       (point-max)
-    (1- (marker-position clatter--messages-marker))))
+    (if (overlayp clatter--typing-indicator-overlay)
+        (1- (overlay-start clatter--typing-indicator-overlay))
+      (1- (marker-position clatter--messages-marker)))))
 
 (defun clatter--get-input ()
   "Get user input text from the prompt."
@@ -1897,8 +1938,9 @@ connected (the common case) or absent."
                 (append
                  (unless (eq (clatter--effective-header-line-preset) 'context)
                    (list " " 'mode-line-buffer-identification))
-                 (list clatter-mode-line-format
-                       '(:eval (clatter--typing-mode-line)))
+                 (list clatter-mode-line-format)
+                 (when (eq clatter-typing-indicator-location 'mode-line)
+                   (list '(:eval (clatter--typing-mode-line))))
                  (when (and (boundp 'clatter-track-show-in-clatter-buffers)
                             clatter-track-show-in-clatter-buffers)
                    (list 'clatter-track-mode-line-item))
@@ -2821,6 +2863,23 @@ If no update is received within this time, the indicator is cleared."
   "Hash table of nicks currently typing in this buffer.
 Keys are nick strings, values are timer objects.")
 
+(defun clatter--refresh-typing-indicator ()
+  "Refresh typing status in the current buffer."
+  (when (overlayp clatter--typing-indicator-overlay)
+    (overlay-put
+     clatter--typing-indicator-overlay 'before-string
+     (when-let* ((text (clatter--typing-string)))
+       (concat (make-string (1+ clatter-nick-column-width) ?\s) text))))
+  (force-mode-line-update))
+
+(defun clatter--expire-typing-indicator (buffer nick)
+  "Remove NICK's expired typing indicator from BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when clatter--typing-nicks
+        (remhash nick clatter--typing-nicks))
+      (clatter--refresh-typing-indicator))))
+
 (defun clatter-ui--on-typing (conn sender target state)
   "Handle typing indicator from NICK in TARGET with STATE on CONN.
 STATE is \"active\", \"paused\", or \"done\"."
@@ -2843,29 +2902,29 @@ STATE is \"active\", \"paused\", or \"done\"."
                 (the-nick nick))
             (puthash nick
                      (run-at-time clatter-typing-timeout nil
-                                  (lambda ()
-                                    (when (buffer-live-p the-buf)
-                                      (with-current-buffer the-buf
-                                        (when clatter--typing-nicks
-                                          (remhash the-nick clatter--typing-nicks))
-                                        (force-mode-line-update)))))
+                                  #'clatter--expire-typing-indicator
+                                  the-buf the-nick)
                      clatter--typing-nicks)))
-        (force-mode-line-update)))))
+        (clatter--refresh-typing-indicator)))))
 
-(defun clatter--typing-mode-line ()
-  "Return a mode-line string showing who is typing, or nil."
+(defun clatter--typing-string ()
+  "Return propertized typing status text, or nil."
   (when (and clatter--typing-nicks
              (> (hash-table-count clatter--typing-nicks) 0))
     (let ((nicks nil))
       (maphash (lambda (k _v) (push k nicks)) clatter--typing-nicks)
       (propertize
-       (concat " "
-               (pcase (length nicks)
+       (concat (pcase (length nicks)
                  (1 (format "%s is typing" (car nicks)))
                  (2 (format "%s and %s are typing" (car nicks) (cadr nicks)))
                  (_ (format "%d people typing" (length nicks))))
                "...")
        'face 'font-lock-doc-face))))
+
+(defun clatter--typing-mode-line ()
+  "Return a mode-line string showing who is typing, or nil."
+  (when-let* ((text (clatter--typing-string)))
+    (concat " " text)))
 
 ;; --- Outbound typing notifications ---
 

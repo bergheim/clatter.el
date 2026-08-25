@@ -3,6 +3,7 @@
 ;;; Code:
 
 (require 'test-helper)
+(require 'clatter-ui)
 (require 'clatter-read-marker)
 
 (defun clatter-test-read-marker--timestamp (time)
@@ -53,6 +54,26 @@
         (clatter-remove-buffer "testnet" "alice")
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
+
+(ert-deftest clatter-test-read-marker-skips-typing-separator ()
+  "Oldest-first visual marker lands on unread history, not typing row."
+  (let ((clatter-message-order 'oldest-first)
+        (clatter-typing-indicator-location 'input-separator))
+    (with-temp-buffer
+      (clatter-mode)
+      (setq-local clatter--target "#emacs")
+      (setq-local clatter--buffer-type 'channel)
+      (clatter--setup-prompt (current-buffer))
+      (clatter--insert-message (current-buffer) "read" t)
+      (clatter--insert-message (current-buffer) "unread" t)
+      (setq-local clatter-read-marker--msgid "seen")
+      (setq-local clatter--unread-count 1)
+      (clatter-read-marker--update-visual)
+      (save-excursion
+        (goto-char (point-min))
+        (search-forward "unread")
+        (should (= (overlay-start clatter-read-marker--overlay)
+                   (line-beginning-position)))))))
 
 (ert-deftest clatter-test-read-marker-enable-tracks-actions ()
   "Read-marker mode tracks both PRIVMSG and CTCP ACTION hooks."
