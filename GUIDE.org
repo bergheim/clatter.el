@@ -999,6 +999,10 @@ by the first captured message, or by the command itself.
 | =RET= | Visit the message in its source buffer    |
 | =q=   | Quit window                               |
 
+=RET= opens the source in another window, keeping the inbox visible.
+With evil, the same keys are bound in normal state automatically
+(=clatter-evil.el= — inert without evil).
+
 Behavior notes:
 
 - Live traffic only. Batched messages, which is how CHATHISTORY backlog and
@@ -1108,6 +1112,7 @@ explicit call from your configuration.
 | =clatter-pals.el=          | Pals, fools and visibility                    | =clatter-pals= / =clatter-fools=        |
 | =clatter-nicklist.el=      | Channel member sidebar                        | =clatter-nicklist-toggle=             |
 | =clatter-unified.el=       | Cross-network unified inbox buffer            | =clatter-unified-enabled= (off)       |
+| =clatter-evil.el=          | Evil bindings for the special buffers         | automatic when evil is loaded         |
 | =clatter-list.el=          | Channel list browser                          | =/list=                               |
 | =clatter-track.el=         | Mode-line activity tracking                   | =clatter-track-enabled= (on)          |
 | =clatter-notify.el=        | Desktop notifications                         | =clatter-notify-enabled= (on)         |

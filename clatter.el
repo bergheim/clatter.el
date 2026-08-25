@@ -64,6 +64,7 @@
 (require 'clatter-log)
 (require 'clatter-url-preview)
 (require 'clatter-unified)
+(require 'clatter-evil)
 (require 'clatter-soju)
 
 ;; --- Autoload entry points ---
