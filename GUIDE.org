@@ -973,9 +973,11 @@ Toggle per buffer with =M-x clatter-nicklist-toggle=.
 ** Unified buffer
 
 =*clatter-unified*= is a single chronological inbox showing live traffic from
-every channel and query across all networks, rendered exactly like a normal
-chat buffer: nick colors, mentions, nick-column grouping, mIRC formatting and
-timestamps all behave the same.
+every channel and query across all networks, rendered like a normal chat
+buffer: sender colors, mentions, nick-column grouping, mIRC formatting and
+timestamps all behave the same. (Nicks inside message text are not
+highlighted — that keys off a channel's member list, which the inbox has
+none of.)
 
 | Variable                 | Default | Description                             |
 |--------------------------+---------+-----------------------------------------|
@@ -988,8 +990,8 @@ Set it before calling =clatter-setup=, which is what installs the capture hooks:
 (clatter-setup)
 #+end_src
 
-Open the buffer with =M-x clatter-unified=. It is created on the first captured
-message, so it does not exist until something arrives.
+Open the buffer with =M-x clatter-unified=. It is created on first use —
+by the first captured message, or by the command itself.
 
 | Key | Action                                    |
 |-----+-------------------------------------------|
