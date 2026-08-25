@@ -8,9 +8,11 @@
 ;; Collects live messages from every channel and query, across all
 ;; networks, into a single `*clatter-unified*' buffer.  Lines are rendered
 ;; by `clatter-insert-generic', the same entry point the per-buffer UI
-;; uses, so nick colors, mentions, grouping and filtering all behave as
-;; they do in a channel.  Enable with `clatter-unified-enabled'; RET on a
-;; message jumps to it in its source buffer.
+;; uses, so sender colors, mentions, grouping and filtering behave as they
+;; do in a channel.  (Nicks inside message text are not highlighted: that
+;; keys off a channel's member list, which this buffer has none of.)
+;; Enable with `clatter-unified-enabled'; RET on a message jumps to it in
+;; its source buffer.
 
 ;;; Code:
 
@@ -90,11 +92,13 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
                  (string-equal-ignore-case (cdr last) buf-target))
       ;; Spell the label out rather than using `clatter-buffer-name': its
       ;; `channel' style drops the network, which is the whole point here.
+      ;; The separator shares the message's invisibility, else a hidden
+      ;; muted/fool message would leave a bare visible separator behind.
       (clatter--insert-message
        buf
        (propertize (format "── %s/%s ──" network buf-target)
                    'face 'font-lock-doc-face)
-       t))
+       t nil nil invisible))
     ;; The source buffer already scanned this message for inline images;
     ;; scanning again would fetch every URL twice.
     (let ((clatter--suppress-image-scan t))
@@ -102,8 +106,12 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
                               server-time invisible
                               (list 'clatter-unified-network network
                                     'clatter-unified-target buf-target)))
-    (with-current-buffer buf
-      (setq clatter-unified--last-source (cons network buf-target)))))
+    ;; Hidden messages must not claim the source context: the next visible
+    ;; message still needs its own separator, or it would sit under a
+    ;; separator the reader cannot see.
+    (unless invisible
+      (with-current-buffer buf
+        (setq clatter-unified--last-source (cons network buf-target))))))
 
 (defun clatter-unified--on-privmsg (conn sender target text server-time)
   "Capture SENDER's PRIVMSG TEXT to TARGET on CONN at SERVER-TIME."
@@ -130,7 +138,13 @@ the one nearest SERVER-TIME, else the newest."
           (forward-line 1))
         (cond
          ((null matches) nil)
-         ((null server-time) (car matches))
+         ((null server-time)
+          ;; MATCHES is in reverse document order.  Which end is newest
+          ;; depends on this buffer's message order: `newest-first' puts
+          ;; new messages at the top.
+          (if (eq clatter-message-order 'newest-first)
+              (car (last matches))
+            (car matches)))
          (t
           (let ((best nil)
                 (best-distance nil))
@@ -158,13 +172,18 @@ the one nearest SERVER-TIME, else the newest."
     (let ((buf (clatter-get-buffer network target)))
       (unless (buffer-live-p buf)
         (user-error "No buffer for %s/%s" network target))
-      (pop-to-buffer buf)
-      (if msgid
-          (clatter-jump-to-msgid buf msgid)
-        (if-let* ((pos (clatter-unified--find-message
-                        buf sender text server-time)))
-            (goto-char pos)
-          (message "Message not found in %s" (buffer-name buf)))))))
+      ;; Resolve the position before showing the buffer, so a message the
+      ;; source has truncated away errors out instead of leaving the user
+      ;; at an arbitrary point.  A stale msgid falls through to the
+      ;; sender+text match.
+      (let ((pos (or (and msgid
+                          (clatter--find-message-position-by-msgid buf msgid))
+                     (clatter-unified--find-message buf sender text
+                                                    server-time))))
+        (unless pos
+          (user-error "Message not found in %s" (buffer-name buf)))
+        (pop-to-buffer buf)
+        (goto-char pos)))))
 
 ;; --- Setup ---
 
