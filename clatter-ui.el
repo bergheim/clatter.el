@@ -707,7 +707,33 @@ append at the bottom like a traditional IRC client."
         (when (and pre-input clatter--input-marker)
           (clatter--update-undo-list
            (- (marker-position clatter--input-marker) pre-input)))
+        (clatter--flyspell-prune-changes)
         (clatter--refresh-input-spacers buffer)))))
+
+(defun clatter--flyspell-prune-changes ()
+  "Drop flyspell change records that lie outside the editable input area.
+Flyspell's after-change hook records a cons for every buffer
+modification, but `flyspell-post-command-hook' only drains them when
+the user runs a command in the buffer.  Message insertion happens from
+process filters and timers, so in background buffers the records
+accumulate without bound (hundreds of MB over hours on busy channels).
+Only changes touching the input area can ever produce a spell check
+(see `clatter--flyspell-predicate'); everything else is dead weight."
+  (when (and (bound-and-true-p flyspell-mode)
+             (boundp 'flyspell-changes)
+             flyspell-changes
+             clatter--input-marker
+             (marker-buffer clatter--input-marker))
+    (let ((beg (marker-position clatter--input-marker))
+          (end (clatter--input-end)))
+      (setq flyspell-changes
+            (cl-delete-if (lambda (change)
+                            (not (and (consp change)
+                                      (integerp (car change))
+                                      (integerp (cdr change))
+                                      (<= (car change) end)
+                                      (>= (cdr change) beg))))
+                          flyspell-changes)))))
 
 (defun clatter--maybe-truncate (_buffer)
   "Truncate the current buffer if it exceeds `clatter-buffer-max-lines'.

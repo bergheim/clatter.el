@@ -794,6 +794,32 @@ signalled `text-read-only'."
         (should (equal (clatter--get-input) ""))
         (should (= (marker-position clatter--messages-marker) messages))))))
 
+(ert-deftest clatter-input-flyspell-changes-stay-bounded ()
+  "Message inserts prune flyspell's per-change records in background buffers.
+Flyspell records a cons for every buffer modification, and only a user
+command in the buffer drains them; without pruning, hours of process-filter
+inserts leak hundreds of MB."
+  (require 'flyspell)
+  (dolist (order '(oldest-first newest-first))
+    (clatter-input-test--with order
+      (setq-local flyspell-mode t) ; state only; never spawns a speller here
+      (setq-local flyspell-changes nil)
+      ;; Programmatic inserts leave no records behind.
+      (dotimes (i 50)
+        ;; Simulate the after-change record a message insert would produce.
+        (let ((m (marker-position clatter--messages-marker)))
+          (push (cons m (1+ m)) flyspell-changes))
+        (clatter--insert-message (current-buffer) (format "message-%d" i) t))
+      (should (null flyspell-changes))
+      ;; A record covering the current input area survives a prune.
+      (goto-char clatter--input-marker)
+      (insert "typo")
+      (let ((input-record (cons (marker-position clatter--input-marker)
+                                (clatter--input-end))))
+        (setq flyspell-changes (list (cons 1 2) input-record))
+        (clatter--flyspell-prune-changes)
+        (should (equal flyspell-changes (list input-record)))))))
+
 (provide 'test-input)
 
 ;;; test-input.el ends here
