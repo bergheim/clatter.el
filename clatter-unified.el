@@ -12,8 +12,9 @@
 ;; do in a channel.  (Nicks inside message text are not highlighted: that
 ;; keys off a channel's member list, which this buffer has none of.)
 ;; Enable with `clatter-unified-enabled'; RET on a message jumps to it in
-;; its source buffer.  `clatter-unified-hide' collapses on-screen or
-;; listed sources the same way fools do: text stays, the spec hides it.
+;; its source buffer.  `clatter-unified-hide-visible' and
+;; `clatter-unified-hide-channels' collapse sources the same way fools
+;; do: text stays, the spec hides it.
 
 ;;; Code:
 
@@ -118,12 +119,13 @@ Used to decide when to insert a channel separator line.")
     (delete-dups atoms)))
 
 (defun clatter-unified--desired-hide-atoms ()
-  "Return the hide atoms `clatter-unified-hide' currently requires."
-  (pcase clatter-unified-hide
-    ('nil nil)
-    ('visible (clatter-unified--visible-hide-atoms))
-    ((pred consp) (clatter-unified--listed-hide-atoms clatter-unified-hide))
-    (_ nil)))
+  "Return hide atoms for the current visible and channel-list options."
+  (delete-dups
+   (append (and clatter-unified-hide-visible
+                (clatter-unified--visible-hide-atoms))
+           (and clatter-unified-hide-channels
+                (clatter-unified--listed-hide-atoms
+                 clatter-unified-hide-channels)))))
 
 (defun clatter-unified--reconcile-hide ()
   "Sync hide atoms in the unified buffer's invisibility spec."
@@ -154,9 +156,9 @@ Used to decide when to insert a channel separator line.")
   (clatter-unified--reconcile-hide))
 
 (defun clatter-unified--sync-hide-hook ()
-  "Install or remove the window hook for `visible' hide mode.
+  "Install or remove the window hook for `clatter-unified-hide-visible'.
 The hook is only live while unified capture is enabled."
-  (if (and (eq clatter-unified-hide 'visible)
+  (if (and clatter-unified-hide-visible
            (memq #'clatter-unified--on-privmsg clatter-privmsg-hook))
       (add-hook 'window-buffer-change-functions
                 #'clatter-unified--window-change)
@@ -164,19 +166,22 @@ The hook is only live while unified capture is enabled."
                  #'clatter-unified--window-change)))
 
 (defun clatter-unified--set-hide (symbol value)
-  "Setter for `clatter-unified-hide'."
+  "Setter for the unified hide options."
   (set-default symbol value)
   (clatter-unified--sync-hide-hook)
   (clatter-unified--reconcile-hide))
 
-(defcustom clatter-unified-hide nil
-  "What to hide in `*clatter-unified*'.
-Nil shows everything.  The symbol `visible' hides sources that currently
-have a live window.  A list of strings hides those targets
-(case-insensitive names, all networks)."
-  :type '(choice (const :tag "Nothing" nil)
-                 (const :tag "Visible buffers" visible)
-                 (repeat :tag "Channel list" string))
+(defcustom clatter-unified-hide-visible nil
+  "When non-nil, hide sources that currently have a live window."
+  :type 'boolean
+  :set #'clatter-unified--set-hide
+  :group 'clatter)
+
+(defcustom clatter-unified-hide-channels nil
+  "Channel or query names to hide in `*clatter-unified*'.
+Case-insensitive; matches every network.  Combined with
+`clatter-unified-hide-visible' when that is also set."
+  :type '(repeat string)
   :set #'clatter-unified--set-hide
   :group 'clatter)
 

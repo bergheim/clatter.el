@@ -597,7 +597,7 @@ at the top of the source buffer, not the bottom."
 
 (ert-deftest clatter-test-unified-hide-list-hides-matching-target ()
   "A hide list conceals matching targets and unhides when cleared."
-  (let ((clatter-unified-hide '("#EMACS")))
+  (let ((clatter-unified-hide-channels '("#EMACS")))
     (clatter-test-unified--with-capture conn
       (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "hidden" nil)
@@ -609,7 +609,7 @@ at the top of the source buffer, not the bottom."
         (with-current-buffer buf
           (should (invisible-p hidden))
           (should-not (invisible-p shown)))
-        (setq clatter-unified-hide nil)
+        (setq clatter-unified-hide-channels nil)
         (clatter-unified--reconcile-hide)
         (with-current-buffer buf
           (should-not (invisible-p hidden))
@@ -617,7 +617,7 @@ at the top of the source buffer, not the bottom."
 
 (ert-deftest clatter-test-unified-hide-list-still-updates-last-source ()
   "Source-hide is temporary, so a hidden run still owns separator context."
-  (let ((clatter-unified-hide '("#emacs")))
+  (let ((clatter-unified-hide-channels '("#emacs")))
     (clatter-test-unified--with-capture conn
       (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "one" nil)
@@ -629,7 +629,7 @@ at the top of the source buffer, not the bottom."
 
 (ert-deftest clatter-test-unified-hide-list-hides-separator ()
   "A hidden source's separator shares the hide atom."
-  (let ((clatter-unified-hide '("#emacs")))
+  (let ((clatter-unified-hide-channels '("#emacs")))
     (clatter-test-unified--with-capture conn
       (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "x" nil)
@@ -641,7 +641,7 @@ at the top of the source buffer, not the bottom."
 
 (ert-deftest clatter-test-unified-hide-visible-follows-windows ()
   "Visible mode hides a source while it has a window, then shows it again."
-  (let ((clatter-unified-hide 'visible))
+  (let ((clatter-unified-hide-visible t))
     (clatter-test-unified--with-capture conn
       (let ((chan (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
             (scratch (get-buffer-create " *clatter-hide-scratch*")))
@@ -666,9 +666,37 @@ at the top of the source buffer, not the bottom."
           (when (buffer-live-p scratch)
             (kill-buffer scratch)))))))
 
+(ert-deftest clatter-test-unified-hide-visible-and-channels-combine ()
+  "On-screen sources and the denylist hide together."
+  (let ((clatter-unified-hide-visible t)
+        (clatter-unified-hide-channels '("#other")))
+    (clatter-test-unified--with-capture conn
+      (let ((chan (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
+            (scratch (get-buffer-create " *clatter-hide-scratch*")))
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "here" nil)
+        (clatter-unified--on-privmsg conn '("bob" "user" "host") "#other"
+                                     "listed" nil)
+        (clatter-unified--on-privmsg conn '("carol" "user" "host") "#keep"
+                                     "shown" nil)
+        (let* ((buf (clatter-test-unified--buffer))
+               (here (clatter-test-unified--line-bol buf "here"))
+               (listed (clatter-test-unified--line-bol buf "listed"))
+               (shown (clatter-test-unified--line-bol buf "shown")))
+          (save-window-excursion
+            (delete-other-windows)
+            (set-window-buffer (selected-window) chan)
+            (clatter-unified--reconcile-hide)
+            (with-current-buffer buf
+              (should (invisible-p here))
+              (should (invisible-p listed))
+              (should-not (invisible-p shown))))
+          (when (buffer-live-p scratch)
+            (kill-buffer scratch)))))))
+
 (ert-deftest clatter-test-unified-disable-clears-hide-atoms ()
   "Disabling capture unhides retained lines."
-  (let ((clatter-unified-hide '("#emacs")))
+  (let ((clatter-unified-hide-channels '("#emacs")))
     (clatter-test-unified--with-capture conn
       (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "x" nil)
@@ -687,7 +715,7 @@ at the top of the source buffer, not the bottom."
                                  "old" nil)
     (let* ((buf (clatter-test-unified--buffer))
            (bol (clatter-test-unified--line-bol buf "old"))
-           (clatter-unified-hide '("#emacs")))
+           (clatter-unified-hide-channels '("#emacs")))
       (clrhash clatter-connections)
       (clatter-unified--reconcile-hide)
       (with-current-buffer buf
@@ -698,18 +726,18 @@ at the top of the source buffer, not the bottom."
   (unwind-protect
       (progn
         (clatter-unified-disable)
-        (clatter-unified--set-hide 'clatter-unified-hide 'visible)
+        (clatter-unified--set-hide 'clatter-unified-hide-visible t)
         (should-not (memq #'clatter-unified--window-change
                           (default-value 'window-buffer-change-functions)))
         (clatter-unified-enable)
         (should (memq #'clatter-unified--window-change
                       (default-value 'window-buffer-change-functions))))
     (clatter-unified-disable)
-    (clatter-unified--set-hide 'clatter-unified-hide nil)))
+    (clatter-unified--set-hide 'clatter-unified-hide-visible nil)))
 
 (ert-deftest clatter-test-unified-hide-visible-registers-hook ()
   "Visible mode installs the window hook; disable removes it."
-  (let ((clatter-unified-hide 'visible))
+  (let ((clatter-unified-hide-visible t))
     (unwind-protect
         (progn
           (clatter-unified-enable)
