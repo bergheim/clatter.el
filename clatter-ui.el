@@ -38,6 +38,11 @@
   "Face for message timestamps."
   :group 'clatter)
 
+(defface clatter-history-divider
+  '((t :inherit shadow))
+  "Face for history divider rows."
+  :group 'clatter)
+
 (defface clatter-nick
   '((t :weight bold))
   "Default face for nicks."
@@ -2688,6 +2693,70 @@ otherwise (the process filter may run in any buffer, so don't rely on
                 (add-text-properties found (1+ found)
                                      (list 'clatter-reactions new-reactions))))))))))
 
+(defun clatter--history-bar-rule-char (&optional window)
+  "Return a one-column rule character for WINDOW's frame.
+TTY fonts often draw ─ two cells wide; ASCII - stays one column."
+  (if (display-graphic-p (and window (window-frame window)))
+      ?─
+    ?-))
+
+(defun clatter--history-bar-window-width (window)
+  "Return the max columns a history bar can occupy in WINDOW."
+  (max 20
+       (cond
+        ((not (window-live-p window)) 72)
+        ((fboundp 'window-max-chars-per-line)
+         (window-max-chars-per-line window))
+        (t (window-body-width window)))))
+
+(defun clatter--history-bar-string (label width &optional rule-char)
+  "Return a WIDTH-wide rule with LABEL centered."
+  (let* ((rule-char (or rule-char (clatter--history-bar-rule-char)))
+         (label (concat " " label " "))
+         (width (max 20 width))
+         (room (max 0 (- width (string-width label))))
+         (left (/ room 2))
+         (right (- room left)))
+    (propertize (concat (make-string left rule-char)
+                        label
+                        (make-string right rule-char))
+                'face 'clatter-history-divider)))
+
+(defun clatter--history-bar (label)
+  "Return a placeholder line for a history bar labeled LABEL."
+  (propertize label 'clatter-history-bar-label label))
+
+(defun clatter--history-bar-refresh (buffer)
+  "Rebuild history-bar overlays in BUFFER for each window showing it."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (remove-overlays (point-min) (point-max) 'clatter-history-bar t)
+      (let ((windows (or (get-buffer-window-list buffer nil t) (list nil))))
+        (save-excursion
+          (goto-char (point-min))
+          (while (not (eobp))
+            (when-let* ((label (get-text-property (point) 'clatter-history-bar-label))
+                        (eol (line-end-position)))
+              (dolist (win windows)
+                (let ((ov (make-overlay (point) eol))
+                      (width (clatter--history-bar-window-width win)))
+                  (overlay-put ov 'clatter-history-bar t)
+                  (overlay-put ov 'evaporate t)
+                  (when win (overlay-put ov 'window win))
+                  (overlay-put ov 'display
+                               (clatter--history-bar-string
+                                label width
+                                (clatter--history-bar-rule-char win))))))
+            (forward-line 1)))))))
+
+(defun clatter--history-bar-on-size (frame)
+  "Refresh history bars after FRAME's windows change size."
+  (dolist (win (window-list frame 'no-minibuffer))
+    (let ((buf (window-buffer win)))
+      (when (and (buffer-live-p buf)
+                 (with-current-buffer buf (derived-mode-p 'clatter-mode)))
+        (clatter--history-bar-refresh buf)))))
+
 (defun clatter-ui--on-batch-complete (conn _batch-type target messages)
   "Handle completed batch: render MESSAGES for TARGET on CONN.
 Renders a visual separator before and after history playback.
@@ -2708,15 +2777,9 @@ on screen, so it renders at the buffer's oldest end, in the direction
              ;; end separator, then messages newest-first, then the start
              ;; separator.
              (messages (if backlog (reverse messages) messages))
-             (sep-text (propertize
-                        (concat " " (make-string 30 ?-) " history "
-                                (make-string 30 ?-) " ")
-                        'face 'font-lock-doc-face))
-             (end-sep-text (propertize (format " %s end of history (%d messages) %s "
-                                               (make-string 20 ?-)
-                                               count
-                                               (make-string 20 ?-))
-                                       'face 'font-lock-doc-face)))
+             (sep-text (clatter--history-bar "history"))
+             (end-sep-text (clatter--history-bar
+                            (format "end of history (%d messages)" count))))
         (clatter--insert-message buf (if backlog end-sep-text sep-text) t)
         ;; Insert each message with dimmed style.  Suppress inline image
         ;; scanning/fetching for history playback: a large backlog would
@@ -2743,7 +2806,10 @@ on screen, so it renders at the buffer's oldest end, in the direction
                 ('action (clatter-insert-action buf sender text conn time invisible))
                 (_ (clatter-insert-privmsg buf sender text conn time invisible))))))
         ;; Insert end separator
-        (clatter--insert-message buf (if backlog sep-text end-sep-text) t)))))
+        (clatter--insert-message buf (if backlog sep-text end-sep-text) t)
+        (clatter--history-bar-refresh buf)
+        (add-hook 'window-size-change-functions
+                  #'clatter--history-bar-on-size)))))
 
 ;; --- CTCP replies ---
 

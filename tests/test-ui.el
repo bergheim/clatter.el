@@ -1648,6 +1648,12 @@ Both message orders keep the page's own messages in display order."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
+(ert-deftest clatter-test-history-bar-string-matches-width ()
+  "The painted rule is exactly WIDTH columns, label included."
+  (let ((bar (clatter--history-bar-string "history" 40)))
+    (should (= 40 (string-width bar)))
+    (should (string-match-p "history" bar))))
+
 ;; --- Typing indicators ---
 
 (ert-deftest clatter-test-typing-location-default-keeps-mode-line-layout ()
