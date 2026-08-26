@@ -127,6 +127,65 @@ Used to decide when to insert a channel separator line.")
                 (clatter-unified--listed-hide-atoms
                  clatter-unified-hide-channels)))))
 
+(defun clatter-unified--hide-atom-at (pos)
+  "Return the source-hide atom at POS, or nil."
+  (seq-find (lambda (elt)
+              (and (symbolp elt)
+                   (string-prefix-p "clatter-unified-hide:"
+                                    (symbol-name elt))))
+            (ensure-list (get-text-property pos 'invisible))))
+
+(defun clatter-unified--clear-gap-overlays ()
+  "Delete hide-run summary overlays in the current buffer."
+  (remove-overlays (point-min) (point-max) 'clatter-unified-hide-bar t))
+
+(defun clatter-unified--place-gap-bar (start count target)
+  "Put a summary bar for COUNT hidden messages from TARGET at START."
+  (let* ((label (propertize (format "── %d in %s ──\n" count (or target "?"))
+                            'face 'font-lock-doc-face))
+         (use-after (> start (point-min)))
+         (beg (if use-after (1- start) start))
+         (ov (make-overlay beg (min (point-max) (1+ beg)))))
+    (overlay-put ov 'clatter-unified-hide-bar t)
+    (overlay-put ov 'evaporate t)
+    (overlay-put ov (if use-after 'after-string 'before-string) label)))
+
+(defun clatter-unified--refresh-gap-overlays ()
+  "Put a summary bar in front of each hidden source run."
+  (clatter-unified--clear-gap-overlays)
+  (save-excursion
+    (goto-char (point-min))
+    (let (start count target atom)
+      (while (not (eobp))
+        (let ((pos (point))
+              (this (and (invisible-p (point))
+                         (clatter-unified--hide-atom-at (point)))))
+          (cond
+           ((and this (eq this atom))
+            (when (get-text-property pos 'clatter-sender)
+              (setq count (1+ count)
+                    target (or target
+                               (get-text-property pos 'clatter-unified-target))))
+            (forward-line 1))
+           (this
+            (when (and start (> count 0))
+              (clatter-unified--place-gap-bar start count target))
+            (setq start pos
+                  atom this
+                  count 0
+                  target nil)
+            (when (get-text-property pos 'clatter-sender)
+              (setq count 1
+                    target (get-text-property pos 'clatter-unified-target)))
+            (forward-line 1))
+           (t
+            (when (and start (> count 0))
+              (clatter-unified--place-gap-bar start count target))
+            (setq start nil atom nil count 0 target nil)
+            (forward-line 1)))))
+      (when (and start (> count 0))
+        (clatter-unified--place-gap-bar start count target)))))
+
 (defun clatter-unified--reconcile-hide ()
   "Sync hide atoms in the unified buffer's invisibility spec."
   (when-let* ((buf (get-buffer clatter-unified--buffer-name))
@@ -139,6 +198,7 @@ Used to decide when to insert a channel separator line.")
         (dolist (atom want)
           (add-to-invisibility-spec atom))
         (setq clatter-unified--hidden-atoms want)
+        (clatter-unified--refresh-gap-overlays)
         (force-window-update buf)))))
 
 (defun clatter-unified--clear-hide-atoms ()
@@ -149,6 +209,7 @@ Used to decide when to insert a channel separator line.")
       (dolist (atom clatter-unified--hidden-atoms)
         (remove-from-invisibility-spec atom))
       (setq clatter-unified--hidden-atoms nil)
+      (clatter-unified--clear-gap-overlays)
       (force-window-update buf))))
 
 (defun clatter-unified--window-change (_frame)
@@ -283,7 +344,8 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
       (when point-tailing
         (goto-char (point-max)))
       (dolist (w tailing)
-        (set-window-point w (point-max))))))
+        (set-window-point w (point-max)))
+      (clatter-unified--refresh-gap-overlays))))
 
 (defun clatter-unified--on-privmsg (conn sender target text server-time)
   "Capture SENDER's PRIVMSG TEXT to TARGET on CONN at SERVER-TIME."

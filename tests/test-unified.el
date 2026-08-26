@@ -748,6 +748,34 @@ at the top of the source buffer, not the bottom."
                             (default-value 'window-buffer-change-functions))))
       (clatter-unified-disable))))
 
+(ert-deftest clatter-test-unified-hide-gap-bar ()
+  "A hidden run gets one summary overlay; clearing hide removes it."
+  (let ((clatter-unified-hide-channels '("#emacs")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#other"
+                                   "a" nil)
+      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#emacs"
+                                   "one" nil)
+      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#emacs"
+                                   "two" nil)
+      (clatter-unified--on-privmsg conn '("carol" "user" "host") "#other"
+                                   "b" nil)
+      (let ((buf (clatter-test-unified--buffer)))
+        (with-current-buffer buf
+          (let* ((ovs (seq-filter
+                       (lambda (ov) (overlay-get ov 'clatter-unified-hide-bar))
+                       (overlays-in (point-min) (point-max))))
+                 (label (and ovs (or (overlay-get (car ovs) 'after-string)
+                                     (overlay-get (car ovs) 'before-string)))))
+            (should (= 1 (length ovs)))
+            (should (string-match-p "2" label))
+            (should (string-match-p "#emacs" label)))
+          (setq clatter-unified-hide-channels nil)
+          (clatter-unified--reconcile-hide)
+          (should-not (seq-some
+                       (lambda (ov) (overlay-get ov 'clatter-unified-hide-bar))
+                       (overlays-in (point-min) (point-max)))))))))
+
 (provide 'test-unified)
 
 ;;; test-unified.el ends here
