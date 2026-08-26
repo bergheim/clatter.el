@@ -963,10 +963,10 @@ for nicks and a description for commands.
 
 ** Nick List Sidebar
 
-| Variable               | Default  | Description                |
-|------------------------+----------+----------------------------|
-| =clatter-nicklist-width= | =20=       | Sidebar width              |
-| =clatter-nicklist-side=  | ='right=  | Which side (left or right) |
+| Variable                 | Default  | Description                |
+|--------------------------+----------+----------------------------|
+| =clatter-nicklist-width= | =20=     | Sidebar width              |
+| =clatter-nicklist-side=  | ='right= | Which side (left or right) |
 
 Toggle with =M-x clatter-nicklist-toggle=. An open list follows the selected channel.
 
@@ -983,21 +983,23 @@ none of.)
 |-----------------------------+---------+-----------------------------------------|
 | =clatter-unified-enabled=     | =nil=     | Capture live messages into the inbox    |
 | =clatter-unified-autoscroll=  | =t=       | Follow new messages when at the bottom  |
+| =clatter-unified-hide-visible=  | =nil=     | Hide sources that currently have a window |
+| =clatter-unified-hide-channels= | =nil=     | Hide these channel/query names (all nets) |
 
 Set it before calling =clatter-setup=, which is what installs the capture hooks:
 
 #+begin_src emacs-lisp
-(setq clatter-unified-enabled t)
+(setopt clatter-unified-enabled t)
 (clatter-setup)
 #+end_src
 
 Open the buffer with =M-x clatter-unified=. It is created on first use —
 by the first captured message, or by the command itself.
 
-| Key | Action                                    |
-|-----+-------------------------------------------|
-| =RET= | Visit the message in its source buffer    |
-| =q=   | Quit window                               |
+| Key   | Action                                 |
+|-------+----------------------------------------|
+| =RET= | Visit the message in its source buffer |
+| =q=   | Quit window                            |
 
 =RET= opens the source in another window, keeping the inbox visible.
 With evil, the same keys are bound in normal state automatically
@@ -1013,6 +1015,10 @@ Behavior notes:
   collapses into a single nick column within its own channel run.
 - Muted senders and fools are hidden exactly as they are in channel buffers,
   and =clatter-toggle-fools= reveals them here too.
+- =clatter-unified-hide-visible= collapses sources you are already looking at.
+  =clatter-unified-hide-channels= is a denylist of channel/query names. Both can
+  be on at once. Set them with =setopt= — their setters resync the buffer; plain
+  =setq= does not. The text stays hidden, not deleted, so it comes back.
 - The buffer is read-only and has no prompt: it is for reading and jumping,
   not for sending. =RET= takes you to the real buffer to reply.
 - It is memory-bounded by =clatter-buffer-max-lines= like any other buffer, and

@@ -580,6 +580,174 @@ at the top of the source buffer, not the bottom."
       (should (= (clatter-unified--find-message chan "alice" "dup" nil)
                  (car matches))))))
 
+;;; Hide
+
+(ert-deftest clatter-test-unified-hide-nil-stamps-atom-but-shows ()
+  "Every captured line carries a hide atom even when nothing is hidden."
+  (clatter-test-unified--with-capture conn
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "hello" nil)
+    (let* ((buf (clatter-test-unified--buffer))
+           (bol (clatter-test-unified--line-bol buf "hello"))
+           (atom (clatter-unified--hide-atom "testnet" "#emacs")))
+      (should bol)
+      (with-current-buffer buf
+        (should (memq atom (ensure-list (get-text-property bol 'invisible))))
+        (should-not (invisible-p bol))))))
+
+(ert-deftest clatter-test-unified-hide-list-hides-matching-target ()
+  "A hide list conceals matching targets and unhides when cleared."
+  (let ((clatter-unified-hide-channels '("#EMACS")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                   "hidden" nil)
+      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#other"
+                                   "shown" nil)
+      (let* ((buf (clatter-test-unified--buffer))
+             (hidden (clatter-test-unified--line-bol buf "hidden"))
+             (shown (clatter-test-unified--line-bol buf "shown")))
+        (with-current-buffer buf
+          (should (invisible-p hidden))
+          (should-not (invisible-p shown)))
+        (setq clatter-unified-hide-channels nil)
+        (clatter-unified--reconcile-hide)
+        (with-current-buffer buf
+          (should-not (invisible-p hidden))
+          (should-not (invisible-p shown)))))))
+
+(ert-deftest clatter-test-unified-hide-list-still-updates-last-source ()
+  "Source-hide is temporary, so a hidden run still owns separator context."
+  (let ((clatter-unified-hide-channels '("#emacs")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                   "one" nil)
+      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#emacs"
+                                   "two" nil)
+      (should (= 1 (clatter-test-unified--count
+                    (clatter-test-unified--buffer)
+                    "──[^\n]*testnet/#emacs"))))))
+
+(ert-deftest clatter-test-unified-hide-list-hides-separator ()
+  "A hidden source's separator shares the hide atom."
+  (let ((clatter-unified-hide-channels '("#emacs")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                   "x" nil)
+      (let ((buf (clatter-test-unified--buffer)))
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (re-search-forward "──[^\n]*testnet/#emacs")
+          (should (invisible-p (match-beginning 0))))))))
+
+(ert-deftest clatter-test-unified-hide-visible-follows-windows ()
+  "Visible mode hides a source while it has a window, then shows it again."
+  (let ((clatter-unified-hide-visible t))
+    (clatter-test-unified--with-capture conn
+      (let ((chan (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
+            (scratch (get-buffer-create " *clatter-hide-scratch*")))
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "here" nil)
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#other"
+                                     "away" nil)
+        (let* ((buf (clatter-test-unified--buffer))
+               (here (clatter-test-unified--line-bol buf "here"))
+               (away (clatter-test-unified--line-bol buf "away")))
+          (save-window-excursion
+            (delete-other-windows)
+            (set-window-buffer (selected-window) chan)
+            (clatter-unified--reconcile-hide)
+            (with-current-buffer buf
+              (should (invisible-p here))
+              (should-not (invisible-p away)))
+            (set-window-buffer (selected-window) scratch)
+            (clatter-unified--reconcile-hide)
+            (with-current-buffer buf
+              (should-not (invisible-p here))))
+          (when (buffer-live-p scratch)
+            (kill-buffer scratch)))))))
+
+(ert-deftest clatter-test-unified-hide-visible-and-channels-combine ()
+  "On-screen sources and the denylist hide together."
+  (let ((clatter-unified-hide-visible t)
+        (clatter-unified-hide-channels '("#other")))
+    (clatter-test-unified--with-capture conn
+      (let ((chan (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
+            (scratch (get-buffer-create " *clatter-hide-scratch*")))
+        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                     "here" nil)
+        (clatter-unified--on-privmsg conn '("bob" "user" "host") "#other"
+                                     "listed" nil)
+        (clatter-unified--on-privmsg conn '("carol" "user" "host") "#keep"
+                                     "shown" nil)
+        (let* ((buf (clatter-test-unified--buffer))
+               (here (clatter-test-unified--line-bol buf "here"))
+               (listed (clatter-test-unified--line-bol buf "listed"))
+               (shown (clatter-test-unified--line-bol buf "shown")))
+          (save-window-excursion
+            (delete-other-windows)
+            (set-window-buffer (selected-window) chan)
+            (clatter-unified--reconcile-hide)
+            (with-current-buffer buf
+              (should (invisible-p here))
+              (should (invisible-p listed))
+              (should-not (invisible-p shown))))
+          (when (buffer-live-p scratch)
+            (kill-buffer scratch)))))))
+
+(ert-deftest clatter-test-unified-disable-clears-hide-atoms ()
+  "Disabling capture unhides retained lines."
+  (let ((clatter-unified-hide-channels '("#emacs")))
+    (clatter-test-unified--with-capture conn
+      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                   "x" nil)
+      (let* ((buf (clatter-test-unified--buffer))
+             (bol (clatter-test-unified--line-bol buf "x")))
+        (with-current-buffer buf
+          (should (invisible-p bol)))
+        (clatter-unified-disable)
+        (with-current-buffer buf
+          (should-not (invisible-p bol)))))))
+
+(ert-deftest clatter-test-unified-hide-list-covers-disconnected-sources ()
+  "A hide list still conceals inbox lines after the connection is gone."
+  (clatter-test-unified--with-capture conn
+    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+                                 "old" nil)
+    (let* ((buf (clatter-test-unified--buffer))
+           (bol (clatter-test-unified--line-bol buf "old"))
+           (clatter-unified-hide-channels '("#emacs")))
+      (clrhash clatter-connections)
+      (clatter-unified--reconcile-hide)
+      (with-current-buffer buf
+        (should (invisible-p bol))))))
+
+(ert-deftest clatter-test-unified-hide-visible-hook-waits-for-enable ()
+  "Customizing hide to visible does not install the window hook until enable."
+  (unwind-protect
+      (progn
+        (clatter-unified-disable)
+        (clatter-unified--set-hide 'clatter-unified-hide-visible t)
+        (should-not (memq #'clatter-unified--window-change
+                          (default-value 'window-buffer-change-functions)))
+        (clatter-unified-enable)
+        (should (memq #'clatter-unified--window-change
+                      (default-value 'window-buffer-change-functions))))
+    (clatter-unified-disable)
+    (clatter-unified--set-hide 'clatter-unified-hide-visible nil)))
+
+(ert-deftest clatter-test-unified-hide-visible-registers-hook ()
+  "Visible mode installs the window hook; disable removes it."
+  (let ((clatter-unified-hide-visible t))
+    (unwind-protect
+        (progn
+          (clatter-unified-enable)
+          (should (memq #'clatter-unified--window-change
+                        (default-value 'window-buffer-change-functions)))
+          (clatter-unified-disable)
+          (should-not (memq #'clatter-unified--window-change
+                            (default-value 'window-buffer-change-functions))))
+      (clatter-unified-disable))))
+
 (provide 'test-unified)
 
 ;;; test-unified.el ends here
