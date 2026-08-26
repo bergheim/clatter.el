@@ -1574,8 +1574,16 @@ state."
       (save-excursion
         (goto-char clatter--prompt-marker)
         (delete-region clatter--prompt-marker clatter--input-marker)
-        (insert (clatter--propertized-prompt))
-        (set-marker clatter--input-marker (point)))
+        (let ((start (point)))
+          (insert (clatter--propertized-prompt))
+          (set-marker clatter--input-marker (point))
+          ;; oldest-first prompt/messages markers are insertion-type t.
+          ;; Leave them there and the next insert lands on the input line.
+          (set-marker clatter--prompt-marker start)
+          (when (and (eq clatter-message-order 'oldest-first)
+                     (markerp clatter--messages-marker)
+                     (> (marker-position clatter--messages-marker) start))
+            (set-marker clatter--messages-marker start))))
       ;; INPUT remains after the newly inserted prompt.  Restore point in it
       ;; so a nick change cannot disrupt someone composing a message.
       (when point-in-input
