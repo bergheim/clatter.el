@@ -1573,9 +1573,20 @@ state."
            (inhibit-read-only t))
       (save-excursion
         (goto-char clatter--prompt-marker)
-        (delete-region clatter--prompt-marker clatter--input-marker)
-        (insert (clatter--propertized-prompt))
-        (set-marker clatter--input-marker (point)))
+        ;; Bottom-prompt markers advance on insertion (type t), so inserting
+        ;; the new prompt would carry them past it: the next refresh would
+        ;; then delete an empty region and append a duplicate prompt, while
+        ;; new messages land below the input line.  Pin them back afterwards.
+        (let ((prompt-pos (marker-position clatter--prompt-marker))
+              (messages-pos (and (eq clatter-message-order 'oldest-first)
+                                 clatter--messages-marker
+                                 (marker-position clatter--messages-marker))))
+          (delete-region clatter--prompt-marker clatter--input-marker)
+          (insert (clatter--propertized-prompt))
+          (set-marker clatter--prompt-marker prompt-pos)
+          (when messages-pos
+            (set-marker clatter--messages-marker messages-pos))
+          (set-marker clatter--input-marker (point))))
       ;; INPUT remains after the newly inserted prompt.  Restore point in it
       ;; so a nick change cannot disrupt someone composing a message.
       (when point-in-input

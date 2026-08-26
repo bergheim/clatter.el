@@ -2344,6 +2344,46 @@ previous message's text properties there used to raise
   (should (equal (clatter--truncate-nick-column "-longnickname-" 8)
                  "-long…-")))
 
+(ert-deftest clatter-refresh-prompt-repeated-keeps-single-prompt ()
+  "Repeated prompt refreshes replace the prompt instead of duplicating it.
+With a bottom prompt the type-t markers must not drift past the inserted
+prompt, or the next refresh appends a second prompt and messages land
+below the input line."
+  (let ((conn (clatter-test-make-connection "testnet" "trevhk"))
+        (clatter-prompt-format "%n: "))
+    (unwind-protect
+        (dolist (order '(oldest-first newest-first))
+          (with-temp-buffer
+            (let ((clatter-message-order order))
+              (clatter-mode)
+              (setq-local clatter--network "testnet")
+              (setq-local clatter--target "#test")
+              (setq-local clatter--buffer-type 'channel)
+              (clatter-ui-setup-buffer (current-buffer))
+              ;; Two nick changes, each refreshing the prompt: the second
+              ;; refresh is where drifted markers duplicated the prompt.
+              (setf (clatter-connection-nick conn) "trev")
+              (clatter--refresh-prompt)
+              (setf (clatter-connection-nick conn) "trev2")
+              (clatter--refresh-prompt)
+              (let ((text (buffer-string)))
+                (should-not (string-match-p "trevhk: " text))
+                (should-not (string-match-p "trev: " text))
+                (should (= 1 (with-temp-buffer
+                               (insert text)
+                               (count-matches "trev2: "
+                                              (point-min) (point-max))))))
+              ;; Messages must still land on the message side of the prompt.
+              (clatter-insert-privmsg (current-buffer) "alice" "hello" conn)
+              (let ((msg (save-excursion
+                           (goto-char (point-min))
+                           (search-forward "hello")
+                           (point))))
+                (if (eq order 'oldest-first)
+                    (should (< msg (marker-position clatter--prompt-marker)))
+                  (should (> msg (marker-position clatter--input-marker))))))))
+      (remhash "testnet" clatter-connections))))
+
 (provide 'test-ui)
 
 ;;; test-ui.el ends here
