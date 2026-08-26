@@ -168,10 +168,13 @@ comparison is local to each Clatter buffer."
   :group 'clatter)
 
 (defcustom clatter-display-on-join t
-  "Whether to display a channel buffer when you join it.
+  "Whether to display a channel buffer when you /join it from this session.
 
-The buffer is always created so that activity tracking continues to work.
-Set this to nil to keep autojoined channels from changing the window layout."
+Only a join this Emacs asked for displays.  Joins you did not request
+here never change the window layout: channels replayed by a bouncer on
+reconnect, autojoins, joins made from another client, and netsplit
+rejoins.  The buffer is always created so that activity tracking
+continues to work."
   :type 'boolean
   :group 'clatter)
 

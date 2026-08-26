@@ -2194,7 +2194,11 @@ the buffer margin-width variables."
     (clatter-nick-add buf sender-nick)
     (when (string-equal sender-nick my-nick)
       (clatter-send conn (clatter-irc-names channel))
-      (when clatter-display-on-join
+      ;; Consume the request whether or not we display, then display only
+      ;; for a join this session asked for: a bouncer replaying every
+      ;; channel on reconnect must not repaint the window layout.
+      (when (and (clatter-consume-requested-join network channel)
+                 clatter-display-on-join)
         (display-buffer buf)))
     (let ((parsed-realname (and realname (clatter-format-parse realname))))
       (clatter--insert-system-event
@@ -2526,6 +2530,7 @@ otherwise (the process filter may run in any buffer, so don't rely on
 (defun clatter-ui--on-disconnect (network-id event)
   "Handle disconnect EVENT for UI: show message in all NETWORK-ID buffers."
   (clatter-ui--clear-pending-self-echoes network-id)
+  (clatter-clear-requested-joins network-id)
   (dolist (buf (clatter-all-buffers network-id))
     (when (buffer-live-p buf)
       (clatter-insert-error buf
@@ -2716,6 +2721,19 @@ later unsolicited replies of the same kind (e.g. the automatic WHO issued
 on rejoin) fall back to the server buffer instead of being routed into
 whichever buffer last issued a query command.")
 
+(defconst clatter--join-failure-numerics
+  '("403"  ; ERR_NOSUCHCHANNEL
+    "405"  ; ERR_TOOMANYCHANNELS
+    "471"  ; ERR_CHANNELISFULL
+    "473"  ; ERR_INVITEONLYCHAN
+    "474"  ; ERR_BANNEDFROMCHAN
+    "475"  ; ERR_BADCHANNELKEY
+    "476")  ; ERR_BADCHANMASK
+  "Numerics that refuse a JOIN.
+Each names the channel in its second parameter.  A refused join draws no
+JOIN echo, so its pending request in `clatter--requested-joins' has to be
+dropped here or a later unsolicited join would inherit the display.")
+
 (defun clatter--query-target (conn)
   "Return the live buffer to route query replies to on CONN, or nil.
 Falls back to nil so callers use the normal server-buffer routing."
@@ -2744,6 +2762,12 @@ of flooding a buffer.  Clears the pending entry on the terminating 315."
   "Handle informational and MODE-related numerics for UI.
 COMMAND is the numeric reply code, PARAMS its parameters on CONN."
   (cl-block clatter-ui--on-numeric
+    ;; Runs ahead of the routing below so a refused join is forgotten even
+    ;; when its numeric returns early or falls through to the catch-all.
+    (when (and (member command clatter--join-failure-numerics)
+               (stringp (nth 1 params)))
+      (clatter-consume-requested-join (clatter-connection-network-id conn)
+                                      (nth 1 params)))
     ;; Route replies to user-initiated query commands (/who, /stats,
     ;; /lusers, ...) to the buffer the command was typed in, when it is
     ;; still live.  Falls through to the pcase below otherwise (e.g. the

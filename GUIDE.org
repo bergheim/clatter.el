@@ -674,9 +674,15 @@ legitimate second client.
 | =clatter-prompt-alignment=       | =nil=            | =right= aligns the prompt with the nick column               |
 | =clatter-away-indicator=         | ="@"=            | Marker appended to your nick while away                    |
 | =clatter-bot-label=              | ="[bot]"=        | Label on messages from nicks with bot mode                 |
-| =clatter-display-on-join=        | =t=              | Show the channel buffer when you join                      |
+| =clatter-display-on-join=        | =t=              | Show the channel buffer when you =/join= it from this session |
 | =clatter-display-on-welcome=     | =t=              | Show the server buffer after the welcome numeric           |
 | =clatter-receive-query-display=  | ='bury=         | Incoming DM buffers: =bury=, =buffer= or =pop=                   |
+
+=clatter-display-on-join= keys off provenance, not timing: a channel is shown
+only when you asked for it here with =/join=.  Joins Clatter did not request --
+the hundreds a bouncer replays on reconnect, =:autojoin= channels, joins made
+from another client, netsplit rejoins -- create their buffer silently and leave
+your window layout alone.
 
 *** Compact system messages
 

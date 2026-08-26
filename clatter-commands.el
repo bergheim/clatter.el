@@ -79,6 +79,21 @@ instead of the server buffer.  See `clatter-ui--on-numeric'."
     (when (> (length trimmed) 0)
       (clatter--send-message trimmed))))
 
+(defun clatter--note-join-request (conn channels)
+  "Remember that this session asked CONN to join CHANNELS.
+CHANNELS is the raw JOIN target parameter, so it may name several
+channels separated by commas; each is recorded on its own.  A channel we
+are already in draws no JOIN echo from the server, so display its buffer
+now instead of recording a request that would never be consumed."
+  (let ((network (clatter-connection-network-id conn))
+        (nick (clatter-connection-nick conn)))
+    (dolist (channel (split-string channels "," t "[ \t]+"))
+      (let ((buf (clatter-get-buffer network channel)))
+        (if (and buf nick (clatter-nick-member-p buf nick))
+            (when clatter-display-on-join
+              (display-buffer buf))
+          (clatter-record-requested-join network channel))))))
+
 (defun clatter-cmd-join (args)
   "Join a channel; ARGS is \"CHANNEL [KEY]\"."
   (let ((conn (clatter--require-conn)))
@@ -87,7 +102,11 @@ instead of the server buffer.  See `clatter-ui--on-numeric'."
              (channel (car parts))
              (key (cadr parts)))
         (if (and channel (> (length channel) 0))
-            (clatter-send conn (clatter-irc-join channel key))
+            (progn
+              ;; Record only once the send has returned: a signaling send
+              ;; must not leave a phantom request behind.
+              (clatter-send conn (clatter-irc-join channel key))
+              (clatter--note-join-request conn channel))
           (clatter-insert-error (current-buffer) "Usage: /join #channel [key]"))))))
 
 (defun clatter-cmd-part (args)

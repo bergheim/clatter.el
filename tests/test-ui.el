@@ -162,10 +162,11 @@
       (should-not displayed))))
 
 (ert-deftest clatter-test-join-display-defaults-to-enabled ()
-  "Self JOIN uses `display-buffer' by default."
+  "Self JOIN to a channel we asked for uses `display-buffer' by default."
   (let ((clatter-display-on-join t)
         (displayed nil))
     (clatter-test-with-ui-connection conn
+      (clatter-record-requested-join "testnet" "#shown")
       (clatter-test-with-mock-send
         (cl-letf (((symbol-function 'display-buffer)
                    (lambda (buf &rest _) (setq displayed buf))))

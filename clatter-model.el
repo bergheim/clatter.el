@@ -238,6 +238,41 @@ TYPE is server, channel, or query (auto-detected if nil)."
                   (eq clatter--buffer-type 'channel))
            collect buf))
 
+;; --- Requested joins ---
+
+(defvar clatter--requested-joins (make-hash-table :test 'equal)
+  "Joins this session asked for, keyed by (NETWORK . downcased CHANNEL).
+An entry means a /join issued from this Emacs is still waiting for the
+server's JOIN echo.  It is what tells a join we requested apart from one
+replayed by a bouncer, autojoined at connect, made from another client,
+or triggered by a netsplit rejoin.  Session-local; never persisted.")
+
+(defun clatter--requested-join-key (network channel)
+  "Return the requested-join key for NETWORK and CHANNEL."
+  (cons network (downcase channel)))
+
+(defun clatter-record-requested-join (network channel)
+  "Record that this session asked to join CHANNEL on NETWORK."
+  (puthash (clatter--requested-join-key network channel) t
+           clatter--requested-joins))
+
+(defun clatter-consume-requested-join (network channel)
+  "Remove the pending join request for CHANNEL on NETWORK.
+Return non-nil if there was one."
+  (let ((key (clatter--requested-join-key network channel)))
+    (prog1 (gethash key clatter--requested-joins)
+      (remhash key clatter--requested-joins))))
+
+(defun clatter-clear-requested-joins (network)
+  "Drop every pending join request for NETWORK."
+  (let ((stale nil))
+    (maphash (lambda (key _value)
+               (when (equal (car key) network)
+                 (push key stale)))
+             clatter--requested-joins)
+    (dolist (key stale)
+      (remhash key clatter--requested-joins))))
+
 ;; --- Input ring ---
 
 (defvar-local clatter-input-ring nil
@@ -284,6 +319,14 @@ Return nil when the ring is empty or N is out of range."
     (with-current-buffer buffer
       (when clatter--nick-list
         (remhash (downcase nick) clatter--nick-list)))))
+
+(defun clatter-nick-member-p (buffer nick)
+  "Return non-nil if NICK is in BUFFER's nick list."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and clatter--nick-list
+              (gethash (downcase nick) clatter--nick-list)
+              t))))
 
 (defun clatter-nick-rename (buffer old-nick new-nick)
   "Rename OLD-NICK to NEW-NICK in BUFFER's nick list."
