@@ -983,6 +983,7 @@ none of.)
 |-----------------------------+---------+-----------------------------------------|
 | =clatter-unified-enabled=     | =nil=     | Capture live messages into the inbox    |
 | =clatter-unified-autoscroll=  | =t=       | Follow new messages when at the bottom  |
+| =clatter-unified-hide=        | =nil=     | Hide nothing, visible windows, or a list |
 
 Set it before calling =clatter-setup=, which is what installs the capture hooks:
 
@@ -1013,6 +1014,9 @@ Behavior notes:
   collapses into a single nick column within its own channel run.
 - Muted senders and fools are hidden exactly as they are in channel buffers,
   and =clatter-toggle-fools= reveals them here too.
+- =clatter-unified-hide= can also collapse sources you are already looking at
+  (='visible=) or a list of channel/query names. The text stays in the buffer;
+  changing the option brings it back.
 - The buffer is read-only and has no prompt: it is for reading and jumping,
   not for sending. =RET= takes you to the real buffer to reply.
 - It is memory-bounded by =clatter-buffer-max-lines= like any other buffer, and
