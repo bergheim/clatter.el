@@ -1995,12 +1995,115 @@ last ran a query command."
 ;; --- Nicklist hooks registered ---
 
 (ert-deftest clatter-test-nicklist-hooks-registered ()
-  "Nicklist auto-refresh hooks are registered."
+  "Nicklist auto-refresh and follow hooks are registered."
   (should (memq #'clatter-nicklist--on-join (default-value 'clatter-join-hook)))
   (should (memq #'clatter-nicklist--on-part (default-value 'clatter-part-hook)))
   (should (memq #'clatter-nicklist--on-quit (default-value 'clatter-quit-hook)))
   (should (memq #'clatter-nicklist--on-nick (default-value 'clatter-nick-hook)))
-  (should (memq #'clatter-nicklist--on-names (default-value 'clatter-names-hook))))
+  (should (memq #'clatter-nicklist--on-names (default-value 'clatter-names-hook)))
+  (should (memq #'clatter-nicklist--follow
+              (default-value 'window-buffer-change-functions)))
+  (should (memq #'clatter-nicklist--follow
+              (default-value 'window-selection-change-functions))))
+
+(ert-deftest clatter-test-nicklist-follows-selected-channel ()
+  "An open nicklist retargets when another channel is selected."
+  (clatter-test-with-ui-connection conn
+    (let ((a (clatter-get-or-create-buffer "testnet" "#a" 'channel))
+          (b (clatter-get-or-create-buffer "testnet" "#b" 'channel))
+          (nl nil))
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (clatter-nick-add a "alice")
+            (clatter-nick-add b "bob")
+            (let* ((chan-win (selected-window))
+                   (nl-win (split-window-right)))
+              (setq nl (get-buffer-create clatter-nicklist--buffer-name))
+              (with-current-buffer nl
+                (clatter-nicklist-mode)
+                (setq clatter-nicklist--source-buffer a)
+                (clatter-nicklist--render a))
+              (set-window-buffer chan-win a)
+              (set-window-buffer nl-win nl)
+              (select-window chan-win)
+              (set-window-buffer chan-win b)
+              (clatter-nicklist--follow (selected-frame))
+              (should (eq (buffer-local-value 'clatter-nicklist--source-buffer nl) b))
+              (with-current-buffer nl
+                (goto-char (point-min))
+                (should (search-forward "bob" nil t))
+                (goto-char (point-min))
+                (should-not (search-forward "alice" nil t)))))
+        (when (buffer-live-p nl) (kill-buffer nl))))))
+
+(ert-deftest clatter-test-nicklist-follow-does-not-open ()
+  "Follow does not create a nicklist when none is showing."
+  (clatter-test-with-ui-connection conn
+    (let ((a (clatter-get-or-create-buffer "testnet" "#a" 'channel)))
+      (when-let* ((stale (get-buffer clatter-nicklist--buffer-name)))
+        (kill-buffer stale))
+      (save-window-excursion
+        (delete-other-windows)
+        (set-window-buffer (selected-window) a)
+        (clatter-nicklist--follow (selected-frame))
+        (should-not (get-buffer clatter-nicklist--buffer-name))))))
+
+(ert-deftest clatter-test-nicklist-follow-ignores-query ()
+  "Selecting a query leaves the last channel nicklist in place."
+  (clatter-test-with-ui-connection conn
+    (let ((a (clatter-get-or-create-buffer "testnet" "#a" 'channel))
+          (q (clatter-get-or-create-buffer "testnet" "alice" 'query))
+          (nl nil))
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (clatter-nick-add a "alice")
+            (let* ((chan-win (selected-window))
+                   (nl-win (split-window-right)))
+              (setq nl (get-buffer-create clatter-nicklist--buffer-name))
+              (with-current-buffer nl
+                (clatter-nicklist-mode)
+                (setq clatter-nicklist--source-buffer a)
+                (clatter-nicklist--render a))
+              (set-window-buffer chan-win a)
+              (set-window-buffer nl-win nl)
+              (select-window chan-win)
+              (set-window-buffer chan-win q)
+              (clatter-nicklist--follow (selected-frame))
+              (should (eq (buffer-local-value 'clatter-nicklist--source-buffer nl) a))
+              (with-current-buffer nl
+                (goto-char (point-min))
+                (should (search-forward "alice" nil t)))))
+        (when (buffer-live-p nl) (kill-buffer nl))))))
+
+(ert-deftest clatter-test-nicklist-auto-refresh-stays-on-source ()
+  "Membership events on another channel do not retarget the list."
+  (clatter-test-with-ui-connection conn
+    (let ((a (clatter-get-or-create-buffer "testnet" "#a" 'channel))
+          (b (clatter-get-or-create-buffer "testnet" "#b" 'channel))
+          (nl nil))
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (clatter-nick-add a "alice")
+            (clatter-nick-add b "bob")
+            (let ((nl-win (split-window-right)))
+              (setq nl (get-buffer-create clatter-nicklist--buffer-name))
+              (with-current-buffer nl
+                (clatter-nicklist-mode)
+                (setq clatter-nicklist--source-buffer a)
+                (clatter-nicklist--render a))
+              (set-window-buffer (selected-window) a)
+              (set-window-buffer nl-win nl)
+              (clatter-nicklist--auto-refresh b)
+              (should (eq (buffer-local-value 'clatter-nicklist--source-buffer nl) a))
+              (with-current-buffer nl
+                (goto-char (point-min))
+                (should (search-forward "alice" nil t))
+                (goto-char (point-min))
+                (should-not (search-forward "bob" nil t)))))
+        (when (buffer-live-p nl) (kill-buffer nl))))))
 
 ;; --- Numeric reply routing ---
 

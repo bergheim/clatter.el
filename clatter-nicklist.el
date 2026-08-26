@@ -7,6 +7,7 @@
 ;;; Commentary:
 ;; Provides a side window displaying channel members with nick colors
 ;; and mode prefixes.  Toggle with `clatter-nicklist-toggle'.
+;; An open sidebar follows the selected channel.
 
 ;;; Code:
 
@@ -22,6 +23,9 @@
   "Side of the frame for the nicklist window."
   :type '(choice (const left) (const right))
   :group 'clatter)
+
+(defconst clatter-nicklist--buffer-name "*clatter-nicks*"
+  "Buffer name of the singleton nicklist sidebar.")
 
 (defvar-local clatter-nicklist--source-buffer nil
   "The channel buffer this nicklist is associated with.")
@@ -42,10 +46,6 @@
 (defun clatter-nicklist--revert (_ignore-auto _noconfirm)
   "Revert function for nicklist buffer."
   (clatter-nicklist-refresh))
-
-(defun clatter-nicklist--buffer-name (channel)
-  "Return nicklist buffer name for CHANNEL."
-  (format "*clatter-nicks: %s*" channel))
 
 (defun clatter-nicklist--render (buf)
   "Render the nicklist for source buffer BUF into the current buffer."
@@ -111,20 +111,10 @@
 (defun clatter-nicklist-close ()
   "Close the nicklist sidebar."
   (interactive)
-  (let ((source (or clatter-nicklist--source-buffer (current-buffer))))
-    (when source
-      (cond
-       ((buffer-live-p source)
-        (with-current-buffer source
-          (when (and clatter--target clatter--nick-list)
-            (let* ((target clatter--target)
-                   (nl-name (clatter-nicklist--buffer-name target))
-                   (existing (get-buffer nl-name)))
-              (when (and existing (get-buffer-window existing))
-                (delete-window (get-buffer-window existing))
-                (kill-buffer existing))))))
-       ((eq source clatter-nicklist--source-buffer)
-        (delete-window (get-buffer-window (current-buffer))))))))
+  (when-let* ((existing (get-buffer clatter-nicklist--buffer-name)))
+    (when-let* ((win (get-buffer-window existing)))
+      (delete-window win))
+    (kill-buffer existing)))
 
 (defun clatter-nicklist-query ()
   "Open a query (DM) with the nick at point."
@@ -142,44 +132,54 @@
                (clatter-get-buffer clatter--network nick)))))))))
 
 (defun clatter-nicklist-toggle ()
-  "Toggle the nicklist sidebar for the current channel."
+  "Toggle the nicklist sidebar.
+An open list follows the selected channel."
   (interactive)
   (unless (and clatter--target clatter--nick-list)
     (user-error "Not in a channel buffer"))
-  (let* ((target clatter--target)
-         (nl-name (clatter-nicklist--buffer-name target))
-         (existing (get-buffer nl-name)))
-    (if (and existing (get-buffer-window existing))
-        ;; Close it
-        (progn
-          (delete-window (get-buffer-window existing))
-          (kill-buffer existing))
-      ;; Open it
-      (let ((source (current-buffer))
-            (nl-buf (get-buffer-create nl-name)))
-        (with-current-buffer nl-buf
-          (clatter-nicklist-mode)
-          (setq clatter-nicklist--source-buffer source)
-          (clatter-nicklist--render source))
-        (display-buffer-in-side-window
-         nl-buf
-         `((side . ,clatter-nicklist-side)
-           (window-width . ,clatter-nicklist-width)
-           (slot . 0)
-           (dedicated . t)))))))
+  (if-let* ((existing (get-buffer clatter-nicklist--buffer-name))
+            ((get-buffer-window existing)))
+      (clatter-nicklist-close)
+    (let ((source (current-buffer))
+          (nl-buf (get-buffer-create clatter-nicklist--buffer-name)))
+      (with-current-buffer nl-buf
+        (clatter-nicklist-mode)
+        (setq clatter-nicklist--source-buffer source)
+        (clatter-nicklist--render source))
+      (display-buffer-in-side-window
+       nl-buf
+       `((side . ,clatter-nicklist-side)
+         (window-width . ,clatter-nicklist-width)
+         (slot . 0)
+         (dedicated . t))))))
+
+(defun clatter-nicklist--follow (frame)
+  "Retarget the open nicklist to FRAME's selected channel."
+  (when-let* ((nl (get-buffer clatter-nicklist--buffer-name))
+              ((get-buffer-window nl))
+              (buf (window-buffer (frame-selected-window frame)))
+              ((not (eq buf nl))))
+    (with-current-buffer buf
+      (when (and (derived-mode-p 'clatter-mode)
+                 clatter--target
+                 clatter--nick-list
+                 (not (eq buf (buffer-local-value
+                               'clatter-nicklist--source-buffer nl))))
+        (with-current-buffer nl
+          (setq clatter-nicklist--source-buffer buf)
+          (clatter-nicklist--render buf))))))
 
 ;; --- Auto-refresh hooks ---
 
 (defun clatter-nicklist--auto-refresh (channel-buffer)
-  "Refresh any open nicklist for CHANNEL-BUFFER."
-  (when (buffer-live-p channel-buffer)
-    (with-current-buffer channel-buffer
-      (when clatter--target
-        (let ((nl-buf (get-buffer
-                       (clatter-nicklist--buffer-name clatter--target))))
-          (when (and nl-buf (get-buffer-window nl-buf))
-            (with-current-buffer nl-buf
-              (clatter-nicklist-refresh))))))))
+  "Refresh the open nicklist when it is showing CHANNEL-BUFFER."
+  (when-let* (((buffer-live-p channel-buffer))
+              (nl-buf (get-buffer clatter-nicklist--buffer-name))
+              ((get-buffer-window nl-buf))
+              ((eq channel-buffer
+                   (buffer-local-value 'clatter-nicklist--source-buffer nl-buf))))
+    (with-current-buffer nl-buf
+      (clatter-nicklist-refresh))))
 
 (defun clatter-nicklist--on-join (conn _nick channel _account _realname)
   "Refresh nicklist on CONN when someone joins CHANNEL."
@@ -195,26 +195,24 @@
     (when buf
       (run-at-time 0.2 nil #'clatter-nicklist--auto-refresh buf))))
 
-(defun clatter-nicklist--on-quit (conn sender _message)
-  "Refresh nicklist on CONN for all channels SENDER was in."
-  (let ((network (clatter-connection-network-id conn))
-        (sender-nick (clatter-prefix-nick sender)))
-    (dolist (buf (clatter-all-buffers))
-      (when (buffer-live-p buf)
-        (with-current-buffer buf
-          (when (and (equal clatter--network network)
-                     clatter--nick-list
-                     (gethash (downcase sender-nick) clatter--nick-list))
-            (run-at-time 0.2 nil #'clatter-nicklist--auto-refresh buf)))))))
+(defun clatter-nicklist--source-on-network (conn)
+  "Return the open nicklist source buffer when it is on CONN's network."
+  (when-let* ((nl (get-buffer clatter-nicklist--buffer-name))
+              (src (buffer-local-value 'clatter-nicklist--source-buffer nl))
+              ((buffer-live-p src))
+              ((equal (buffer-local-value 'clatter--network src)
+                      (clatter-connection-network-id conn))))
+    src))
+
+(defun clatter-nicklist--on-quit (conn _sender _message)
+  "Refresh nicklist on CONN after a quit."
+  (when-let* ((src (clatter-nicklist--source-on-network conn)))
+    (run-at-time 0.2 nil #'clatter-nicklist--auto-refresh src)))
 
 (defun clatter-nicklist--on-nick (conn _old-nick _new-nick)
   "Refresh nicklist on CONN when someone changes nick."
-  (let ((network (clatter-connection-network-id conn)))
-    (dolist (buf (clatter-all-buffers))
-      (when (buffer-live-p buf)
-        (with-current-buffer buf
-          (when (equal clatter--network network)
-            (run-at-time 0.2 nil #'clatter-nicklist--auto-refresh buf)))))))
+  (when-let* ((src (clatter-nicklist--source-on-network conn)))
+    (run-at-time 0.2 nil #'clatter-nicklist--auto-refresh src)))
 
 (defun clatter-nicklist--on-names (conn channel _names-str)
   "Refresh nicklist on CONN after NAMES reply for CHANNEL."
@@ -224,12 +222,14 @@
       (run-at-time 0.2 nil #'clatter-nicklist--auto-refresh buf))))
 
 (defun clatter-nicklist-init ()
-  "Register nicklist auto-refresh hooks."
+  "Register nicklist auto-refresh and follow hooks."
   (add-hook 'clatter-join-hook #'clatter-nicklist--on-join)
   (add-hook 'clatter-part-hook #'clatter-nicklist--on-part)
   (add-hook 'clatter-quit-hook #'clatter-nicklist--on-quit)
   (add-hook 'clatter-nick-hook #'clatter-nicklist--on-nick)
-  (add-hook 'clatter-names-hook #'clatter-nicklist--on-names))
+  (add-hook 'clatter-names-hook #'clatter-nicklist--on-names)
+  (add-hook 'window-buffer-change-functions #'clatter-nicklist--follow)
+  (add-hook 'window-selection-change-functions #'clatter-nicklist--follow))
 
 ;; Auto-init when loaded
 (clatter-nicklist-init)
