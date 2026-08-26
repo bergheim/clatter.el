@@ -5,6 +5,7 @@
 (require 'test-helper)
 (require 'clatter-ui)
 (require 'clatter-commands)
+(require 'clatter-list)
 (require 'clatter-nicklist)
 (require 'clatter-pals)
 
@@ -172,6 +173,205 @@
                    (lambda (buf &rest _) (setq displayed buf))))
           (clatter-ui--on-join conn '("testnick" "user" "host") "#shown" nil nil)))
       (should (bufferp displayed)))))
+
+;; --- Join provenance ---
+;;
+;; `clatter-display-on-join' only displays joins this session asked for.
+;; The pending requests live in a global table, so every test here runs
+;; against a private one.
+
+(defmacro clatter-test-with-requested-joins (&rest body)
+  "Run BODY against a private, empty `clatter--requested-joins' table."
+  (declare (indent 0))
+  `(let ((clatter--requested-joins (make-hash-table :test 'equal)))
+     ,@body))
+
+(defun clatter-test--join-pending-p (network channel)
+  "Return non-nil if NETWORK's CHANNEL has a pending join request."
+  (gethash (cons network (downcase channel)) clatter--requested-joins))
+
+(ert-deftest clatter-test-requested-join-displays-once ()
+  "A requested join displays its buffer, and only the first echo does.
+The request is keyed case-insensitively, so the echo's spelling of the
+channel need not match the one /join sent."
+  (let ((clatter-display-on-join t)
+        (displays 0))
+    (clatter-test-with-requested-joins
+      (clatter-test-with-ui-connection conn
+        (clatter-record-requested-join "testnet" "#Provenance")
+        (clatter-test-with-mock-send
+          (cl-letf (((symbol-function 'display-buffer)
+                     (lambda (&rest _) (cl-incf displays))))
+            (clatter-ui--on-join conn '("testnick" "user" "host")
+                                 "#provenance" nil nil)
+            (should (= displays 1))
+            (should-not (clatter-test--join-pending-p "testnet" "#provenance"))
+            ;; A second echo for the same channel (netsplit rejoin, bouncer
+            ;; replay) finds nothing pending and must not display again.
+            (clatter-ui--on-join conn '("testnick" "user" "host")
+                                 "#provenance" nil nil)))
+        (should (= displays 1))))))
+
+(ert-deftest clatter-test-unsolicited-join-creates-buffer-without-display ()
+  "A join we did not ask for still gets a buffer but no window.
+Autojoins and bouncer replays arrive this way; tracking needs the buffer,
+the window layout must not move."
+  (let ((clatter-display-on-join t)
+        (displays 0))
+    (clatter-test-with-requested-joins
+      (clatter-test-with-ui-connection conn
+        (clatter-test-with-mock-send
+          (cl-letf (((symbol-function 'display-buffer)
+                     (lambda (&rest _) (cl-incf displays))))
+            (clatter-ui--on-join conn '("testnick" "user" "host")
+                                 "#autojoined" nil nil)))
+        (should (clatter-get-buffer "testnet" "#autojoined"))
+        (should (= displays 0))))))
+
+(ert-deftest clatter-test-join-failure-numeric-drops-request ()
+  "A refused JOIN drops its request, so a later join does not inherit it.
+The refusal draws no JOIN echo, which would otherwise leave the entry
+pending until some unrelated join consumed it."
+  (let ((clatter-display-on-join t))
+    ;; Spelled out rather than read from `clatter--join-failure-numerics',
+    ;; so shrinking that list is a test failure rather than a shorter loop.
+    (dolist (numeric '("403"    ; ERR_NOSUCHCHANNEL
+                       "405"    ; ERR_TOOMANYCHANNELS
+                       "471"    ; ERR_CHANNELISFULL
+                       "473"    ; ERR_INVITEONLYCHAN
+                       "474"    ; ERR_BANNEDFROMCHAN
+                       "475"    ; ERR_BADCHANNELKEY
+                       "476"))  ; ERR_BADCHANMASK
+      (let ((displays 0))
+        (clatter-test-with-requested-joins
+          (clatter-test-with-ui-connection conn
+            (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+            (clatter-record-requested-join "testnet" "#refused")
+            (cl-letf (((symbol-function 'clatter-insert-system)
+                       (lambda (&rest _) nil)))
+              (clatter-ui--on-numeric conn numeric
+                                      (list "testnick" "#refused"
+                                            "Cannot join channel")))
+            (should-not (clatter-test--join-pending-p "testnet" "#refused"))
+            (clatter-test-with-mock-send
+              (cl-letf (((symbol-function 'display-buffer)
+                         (lambda (&rest _) (cl-incf displays))))
+                (clatter-ui--on-join conn '("testnick" "user" "host")
+                                     "#refused" nil nil)))
+            (should (= displays 0))))))))
+
+(ert-deftest clatter-test-non-failure-numeric-keeps-join-request ()
+  "A numeric that is not a join refusal leaves the request alone.
+RPL_ENDOFNAMES arrives on a successful join, before the echo is handled
+in some orders; dropping the request there would lose the display."
+  (let ((clatter-display-on-join t)
+        (displays 0))
+    (clatter-test-with-requested-joins
+      (clatter-test-with-ui-connection conn
+        (clatter-get-or-create-buffer "testnet" "*server*" 'server)
+        (clatter-record-requested-join "testnet" "#wanted")
+        (cl-letf (((symbol-function 'clatter-insert-system)
+                   (lambda (&rest _) nil)))
+          (clatter-ui--on-numeric conn "366"
+                                  '("testnick" "#wanted" "End of /NAMES list")))
+        (should (clatter-test--join-pending-p "testnet" "#wanted"))
+        (clatter-test-with-mock-send
+          (cl-letf (((symbol-function 'display-buffer)
+                     (lambda (&rest _) (cl-incf displays))))
+            (clatter-ui--on-join conn '("testnick" "user" "host")
+                                 "#wanted" nil nil)))
+        (should (= displays 1))))))
+
+(ert-deftest clatter-test-disconnect-clears-requested-joins ()
+  "Disconnecting forgets that network's pending joins and no other's.
+Otherwise the bouncer's channel replay on reconnect would display."
+  (let ((clatter-display-on-join t)
+        (displays 0))
+    (clatter-test-with-requested-joins
+      (clatter-test-with-ui-connection conn
+        (clatter-record-requested-join "testnet" "#pending")
+        (clatter-record-requested-join "othernet" "#pending")
+        (clatter-ui--on-disconnect "testnet" "closed")
+        (should-not (clatter-test--join-pending-p "testnet" "#pending"))
+        (should (clatter-test--join-pending-p "othernet" "#pending"))
+        (clatter-test-with-mock-send
+          (cl-letf (((symbol-function 'display-buffer)
+                     (lambda (&rest _) (cl-incf displays))))
+            (clatter-ui--on-join conn '("testnick" "user" "host")
+                                 "#pending" nil nil)))
+        (should (= displays 0))))))
+
+(ert-deftest clatter-test-join-display-disabled-still-consumes-request ()
+  "With display off a requested join is silent, and stops being pending.
+The option wins over provenance, and the stale entry must not survive to
+be spent by a later join once the option is turned back on."
+  (let ((displays 0))
+    (clatter-test-with-requested-joins
+      (clatter-test-with-ui-connection conn
+        (clatter-record-requested-join "testnet" "#muted")
+        (clatter-test-with-mock-send
+          (cl-letf (((symbol-function 'display-buffer)
+                     (lambda (&rest _) (cl-incf displays))))
+            (let ((clatter-display-on-join nil))
+              (clatter-ui--on-join conn '("testnick" "user" "host")
+                                   "#muted" nil nil))
+            (should (= displays 0))
+            (should-not (clatter-test--join-pending-p "testnet" "#muted"))
+            (let ((clatter-display-on-join t))
+              (clatter-ui--on-join conn '("testnick" "user" "host")
+                                   "#muted" nil nil))))
+        (should (= displays 0))))))
+
+(ert-deftest clatter-test-join-command-shows-channel-already-joined ()
+  "/join for a channel we are in displays it now and records nothing.
+The server sends no JOIN echo for it, so a recorded request would sit
+pending forever."
+  (let ((clatter-display-on-join t)
+        (displays 0))
+    (clatter-test-with-requested-joins
+      (clatter-test-with-ui-connection conn
+        (clatter-nick-add (clatter-get-or-create-buffer "testnet" "#here"
+                                                        'channel)
+                          "testnick")
+        (clatter-test-with-mock-send
+          (with-temp-buffer
+            (clatter-mode)
+            (setq-local clatter--network "testnet")
+            (setq-local clatter--target "#here")
+            (cl-letf (((symbol-function 'display-buffer)
+                       (lambda (&rest _) (cl-incf displays))))
+              (clatter-cmd-join "#here"))))
+        (should (= displays 1))
+        (should-not (clatter-test--join-pending-p "testnet" "#here"))
+        (should (clatter-test-sent-matching "\\`JOIN #here"))))))
+
+(ert-deftest clatter-test-join-command-records-each-comma-separated-channel ()
+  "/join #one,#two records a request per channel, not one for the list."
+  (clatter-test-with-requested-joins
+    (clatter-test-with-ui-connection conn
+      (clatter-test-with-mock-send
+        (with-temp-buffer
+          (clatter-mode)
+          (setq-local clatter--network "testnet")
+          (setq-local clatter--target "*server*")
+          (clatter-cmd-join "#one,#two secret")))
+      (should (clatter-test--join-pending-p "testnet" "#one"))
+      (should (clatter-test--join-pending-p "testnet" "#two"))
+      (should-not (clatter-test--join-pending-p "testnet" "#one,#two"))
+      (should (clatter-test-sent-matching "\\`JOIN #one,#two secret")))))
+
+(ert-deftest clatter-test-list-join-button-records-request ()
+  "Picking a channel in the list is as explicit as /join, so it records."
+  (clatter-test-with-requested-joins
+    (clatter-test-with-ui-connection conn
+      (clatter-test-with-mock-send
+        (with-temp-buffer
+          (setq-local clatter-list--local-conn conn)
+          (cl-letf (((symbol-function 'tabulated-list-get-id)
+                     (lambda (&rest _) "#from-list")))
+            (clatter-list-join))))
+      (should (clatter-test--join-pending-p "testnet" "#from-list"))
+      (should (clatter-test-sent-matching "\\`JOIN #from-list")))))
 
 (ert-deftest clatter-test-welcome-display-can-be-disabled ()
   "Welcome still creates the server buffer when automatic display is disabled."
