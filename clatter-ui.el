@@ -2729,15 +2729,16 @@ whichever buffer last issued a query command.")
     "473"  ; ERR_INVITEONLYCHAN
     "474"  ; ERR_BANNEDFROMCHAN
     "475"  ; ERR_BADCHANNELKEY
-    "476"  ; ERR_BADCHANMASK
-    "477"  ; ERR_NEEDREGGEDNICK
-    "489")  ; ERR_SECUREONLYCHAN
+    "476")  ; ERR_BADCHANMASK
   "Numerics that refuse a JOIN.
 Each names the channel in its second parameter, except 437, which names
 a nick when it refuses a NICK instead of a JOIN -- harmless, the consume
 then simply matches nothing.  A refused join draws no JOIN echo, so its
 pending request in `clatter--requested-joins' has to be dropped here or a
-later unsolicited join would inherit the display.")
+later unsolicited join would inherit the display.  Daemon-specific join
+refusals (477, 489) are deliberately absent: their meanings vary across
+servers, and wrongly consuming an entry would suppress a display the
+user asked for, which is worse than the self-healing stale entry.")
 
 (defun clatter--query-target (conn)
   "Return the live buffer to route query replies to on CONN, or nil.

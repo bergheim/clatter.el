@@ -245,9 +245,7 @@ pending until some unrelated join consumed it."
                        "473"    ; ERR_INVITEONLYCHAN
                        "474"    ; ERR_BANNEDFROMCHAN
                        "475"    ; ERR_BADCHANNELKEY
-                       "476"    ; ERR_BADCHANMASK
-                       "477"    ; ERR_NEEDREGGEDNICK
-                       "489"))  ; ERR_SECUREONLYCHAN
+                       "476"))  ; ERR_BADCHANMASK
       (let ((displays 0))
         (clatter-test-with-requested-joins
           (clatter-test-with-ui-connection conn
