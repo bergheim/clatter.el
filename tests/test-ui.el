@@ -864,6 +864,20 @@ system messages."
                            (make-string 15 ?\s)))
             (should (equal (get-text-property position 'line-prefix) ""))))))))
 
+(ert-deftest clatter-test-compact-system-layout-does-not-record-undo ()
+  "Presentation refreshes do not grow the user's input undo history."
+  (let ((clatter-compact-system-messages 'compact))
+    (clatter-test-with-ui-connection conn
+      (let ((buffer (clatter-get-or-create-buffer "testnet" "#test")))
+        (clatter-ui-setup-buffer buffer)
+        (clatter--insert-system-event
+         buffer 'join '(:nick "alice" :channel "#test") 'join)
+        (with-current-buffer buffer
+          (buffer-enable-undo)
+          (setq buffer-undo-list nil)
+          (clatter--refresh-compact-system-layout)
+          (should-not buffer-undo-list))))))
+
 (ert-deftest clatter-test-compact-system-visible-later-event-keeps-indent ()
   "A visible later action retains indentation when the first action is hidden."
   (let ((clatter-compact-system-messages 'compact)

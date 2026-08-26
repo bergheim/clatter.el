@@ -1292,6 +1292,7 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
 `visible-mode' is disabled and restores Clatter's suppression categories."
   (when (derived-mode-p 'clatter-mode)
     (let ((inhibit-read-only t)
+          (buffer-undo-list t)
           (position (point-min)))
       (while-let ((group-start
                    (text-property-not-all
