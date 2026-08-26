@@ -614,6 +614,14 @@ approach in `erc-update-undo-list'."
             (setcdr cons (+ (cdr cons) shift)))))
         (setq list (cdr list))))))
 
+(defun clatter--body-width (&optional buffer)
+  "Return the body width of a window showing BUFFER, else the frame width.
+The frame fallback keeps headless and temp-buffer contexts working."
+  (if-let* ((win (car (get-buffer-window-list (or buffer (current-buffer))
+                                              nil 'visible))))
+      (window-body-width win)
+    (frame-width)))
+
 (defun clatter--effective-fill-column (&optional buffer)
   "Return the column at which to hard-wrap inserted message text.
 When `clatter-fill-column' is an integer, return it.  When it is the
@@ -629,10 +637,8 @@ column is too narrow to wrap past the nick indent."
     (pcase clatter-fill-column
       ('nil nil)
       ('auto
-       (let* ((buf (or buffer (current-buffer)))
-              (win (car (get-buffer-window-list buf nil 'visible)))
-              (raw (if win (window-body-width win) (frame-width)))
-              (col (min raw (or clatter-max-line-length 400))))
+       (let ((col (min (clatter--body-width buffer)
+                       (or clatter-max-line-length 400))))
          (when (> col floor-col) col)))
       (col (when (and (integerp col) (> col floor-col)) col)))))
 
@@ -640,11 +646,57 @@ column is too narrow to wrap past the nick indent."
   "Return non-nil when timestamps use a window margin."
   (memq clatter-timestamp-side '(left right)))
 
+(defun clatter--timestamp-overlay-p ()
+  "Return non-nil when timestamps use a per-message overlay."
+  (memq clatter-timestamp-side '(left right inline)))
+
+(defun clatter--timestamp-spoken-p (msg-props invisible)
+  "Return non-nil when this insert is a visible PRIVMSG or action."
+  (and (not invisible)
+       (memq (plist-get msg-props 'clatter-msg-type) '(privmsg action))))
+
+;; `:align-to' runs before word-wrap, so leftover space on the last
+;; visual row can't be used.  Decided at insert time — stale after a
+;; window resize until the line is rewritten.
+(defun clatter--timestamp-inline-break-p (eol ts-str)
+  "Return non-nil when the line ending at EOL leaves no room for TS-STR."
+  (save-excursion
+    (goto-char eol)
+    (> (current-column)
+       (- (clatter--body-width) (string-width ts-str) 1))))
+
+(defun clatter--timestamp-overlay-apply (ov ts-str &optional tooltip)
+  "Attach the timestamp string for TS-STR to OV for the current side.
+TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
+  (let ((stamp (propertize ts-str
+                           'face '(clatter-timestamp default)
+                           'help-echo tooltip)))
+    (if (eq clatter-timestamp-side 'inline)
+        ;; Stamp sits on the message's last row; one that doesn't fit is
+        ;; dropped.  No fresh-row fallback: an overlay-string row has no
+        ;; buffer position of its own, so point can't land on it and
+        ;; vertical motion gets trapped.
+        (overlay-put ov 'before-string
+                     (unless (clatter--timestamp-inline-break-p
+                              (overlay-start ov) ts-str)
+                       (concat (propertize
+                                " " 'display
+                                `(space :align-to
+                                        (- right ,(string-width ts-str))))
+                               stamp)))
+      ;; Apply 'default face after 'clatter-timestamp so no unwanted face
+      ;; properties are inherited from text which might be at point.
+      (overlay-put ov 'before-string
+                   (propertize " " 'display
+                               `((margin ,(if (eq clatter-timestamp-side 'left)
+                                              'left-margin
+                                            'right-margin))
+                                 ,stamp))))))
+
 (defun clatter--timestamp-divider-spoken-p (msg-props invisible)
   "Return non-nil when this insert can own a minute-divider row."
   (and (eq clatter-timestamp-side 'divider)
-       (not invisible)
-       (memq (plist-get msg-props 'clatter-msg-type) '(privmsg action))))
+       (clatter--timestamp-spoken-p msg-props invisible)))
 
 (defun clatter--timestamp-divider-key (time)
   "Return the divider bucket key for TIME.
@@ -684,11 +736,9 @@ append at the bottom like a traditional IRC client."
                       (format-time-string clatter-timestamp-format time)))
                    (spoken-div-p
                     (clatter--timestamp-divider-spoken-p msg-props invisible))
-                   ;; Coalescing key: the formatted value rather than the raw
-                   ;; time, so formats without seconds coalesce correctly and
-                   ;; each buffer keeps its own timestamp run.  Divider mode
-                   ;; only keys spoken lines, so joins/parts cannot open a
-                   ;; new minute row.
+                   ;; Key on the formatted value so formats without seconds
+                   ;; coalesce.  Divider mode keys only spoken lines, so
+                   ;; joins/parts cannot open a minute row.
                    (ts-key (and formatted-timestamp
                                 (if (eq clatter-timestamp-side 'divider)
                                     (and spoken-div-p
@@ -697,14 +747,18 @@ append at the bottom like a traditional IRC client."
                    (ts-changed-p
                     (not (equal ts-key clatter--last-timestamp-key)))
                    (ts-str (and formatted-timestamp
-                                (clatter--timestamp-margin-p)
+                                ;; Margin modes stamp every line; inline
+                                ;; stamps only spoken ones.
+                                (if (eq clatter-timestamp-side 'inline)
+                                    (clatter--timestamp-spoken-p msg-props invisible)
+                                  (clatter--timestamp-margin-p))
                                 (or (not clatter-timestamp-only-if-changed)
                                     ts-changed-p)
                                 formatted-timestamp))
                    (ts-tooltip-str
-                    (unless no-timestamp
-                      (when clatter-timestamp-tooltip-format
-                        (format-time-string clatter-timestamp-tooltip-format time))))
+                    (and (not no-timestamp)
+                         clatter-timestamp-tooltip-format
+                         (format-time-string clatter-timestamp-tooltip-format time)))
                    (wrap-col (1+ clatter-nick-column-width))
                    (wrap-prefix (make-string wrap-col ?\s))
                    (line-props (list 'read-only t
@@ -734,18 +788,12 @@ append at the bottom like a traditional IRC client."
                         (adaptive-fill-mode nil))
                     (fill-region start (1- (point))))))
               (when ts-str
-                (let ((ov (make-overlay start (1+ start) nil t)))
-                  (overlay-put ov 'before-string
-                               ;; Apply 'default face after 'clatter-timestamp to ensure that no
-                               ;; unwanted face properties are inherited from text which might be
-                               ;; at point.
-                               (propertize " " 'display
-                                           `((margin ,(if (eq clatter-timestamp-side 'left)
-                                                          'left-margin
-                                                        'right-margin))
-                                             ,(propertize ts-str
-                                                          'face '(clatter-timestamp default)
-                                                          'help-echo ts-tooltip-str))))
+                (let ((ov (if (eq clatter-timestamp-side 'inline)
+                              ;; Covers the final newline; rear stays put so
+                              ;; a message inserted below can't extend it.
+                              (make-overlay (1- (point)) (point) nil t)
+                            (make-overlay start (1+ start) nil t))))
+                  (clatter--timestamp-overlay-apply ov ts-str ts-tooltip-str)
                   (overlay-put ov 'clatter-timestamp t)
                   (overlay-put ov 'invisible invisible)))
               (add-text-properties start (point) line-props)
@@ -1128,17 +1176,13 @@ identical messages sent close together each reconcile only one local line."
                                            'clatter-text text))
                 (when msgid
                   (put-text-property start end 'clatter-msgid msgid))
-                (when (and server-time (clatter--timestamp-margin-p))
-                  (dolist (overlay (overlays-at start))
+                (when (and server-time (clatter--timestamp-overlay-p))
+                  (dolist (overlay (overlays-in start end))
                     (when (overlay-get overlay 'clatter-timestamp)
-                      (overlay-put overlay 'before-string
-                                   (propertize " " 'display
-                                               `((margin ,(if (eq clatter-timestamp-side 'left)
-                                                              'left-margin
-                                                            'right-margin))
-                                                 ,(propertize
-                                                   (format-time-string clatter-timestamp-format server-time)
-                                                   'face '(clatter-timestamp default))))))))
+                      (clatter--timestamp-overlay-apply
+                       overlay
+                       (format-time-string clatter-timestamp-format
+                                           server-time)))))
                 ;; Do not consume a pending record unless its tentative line
                 ;; still exists.  Buffer truncation may have removed it, in
                 ;; which case the caller must insert the server echo normally.

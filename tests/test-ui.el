@@ -462,6 +462,11 @@ always showing fool messages."
   (cl-count-if (lambda (overlay) (overlay-get overlay 'clatter-timestamp))
                (overlays-in (point-min) (point-max))))
 
+(defun clatter-test--timestamp-overlay ()
+  "Return the first message timestamp overlay in the current buffer."
+  (cl-find-if (lambda (overlay) (overlay-get overlay 'clatter-timestamp))
+              (overlays-in (point-min) (point-max))))
+
 (ert-deftest clatter-test-timestamps-only-if-changed-coalesces-formatted-values ()
   "Repeated formatted timestamps use one margin timestamp when enabled."
   (let ((clatter-timestamp-only-if-changed t)
@@ -538,7 +543,60 @@ always showing fool messages."
       (let ((clatter-timestamp-side 'divider))
         (clatter--sync-window-margins)
         (should-not (car (window-margins)))
+        (should-not (cdr (window-margins))))
+      (let ((clatter-timestamp-side 'inline))
+        (clatter--sync-window-margins)
+        (should-not (car (window-margins)))
         (should-not (cdr (window-margins)))))))
+
+(ert-deftest clatter-test-timestamp-inline-aligns-to-right ()
+  "Inline timestamps use an after-string aligned to the window edge."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (conn (clatter-test-make-connection))
+        (time (encode-time 0 12 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "hello" conn time)
+          (let ((ov (clatter-test--timestamp-overlay)))
+            (should ov)
+            (should-not (overlay-get ov 'after-string))
+            (let* ((before (overlay-get ov 'before-string))
+                   (display (get-text-property 0 'display before)))
+              (should (string-match-p "10:12" before))
+              (should (eq (car display) 'space))
+              (should (equal (plist-get (cdr display) :align-to) '(- right 5))))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-inline-break-when-wrapped ()
+  "A line with no room left for the stamp gets no stamp at all."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (clatter-fill-column nil)
+        (conn (clatter-test-make-connection))
+        (time (encode-time 0 12 10 1 1 2026))
+        (msg (make-string (+ (frame-width) 50) ?x)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" msg conn time)
+          (let ((ov (clatter-test--timestamp-overlay)))
+            (should ov)
+            ;; No stamp row of its own: a display-string row is anchored at a
+            ;; position a neighbouring row already owns, so point cannot land
+            ;; on it and vertical motion (evil j/k) gets trapped.
+            (should-not (overlay-get ov 'before-string))
+            (should-not (overlay-get ov 'after-string))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-inline-skips-system ()
+  "Inline timestamps omit system lines (CTCP, joins, history chrome)."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M"))
+    (with-temp-buffer
+      (clatter-insert-system (current-buffer) "CTCP VERSION reply from knighthk")
+      (should (= 0 (clatter-test--timestamp-overlay-count))))))
 
 (defun clatter-test--divider-positions ()
   "Return buffer positions of minute-divider lines."

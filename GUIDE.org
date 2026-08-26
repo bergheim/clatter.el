@@ -657,27 +657,27 @@ legitimate second client.
 
 ** Display
 
-| Variable                       | Default        | Description                                                |
-|--------------------------------+----------------+------------------------------------------------------------|
-| =clatter-message-order=          | ='newest-first= | Input at top with messages below, or =oldest-first=          |
-| =clatter-timestamp-format=       | ="%H:%M"=        | Timestamp format string                                    |
-| =clatter-timestamp-side=         | ='right=        | =left=/=right= margin, =divider= minute row, or =nil=            |
-| =clatter-timestamp-divider-interval= | =1=        | Minutes between =divider= rows                               |
-| =clatter-timestamp-only-if-changed= | =nil=       | Show a timestamp only when it differs from the previous    |
-| =clatter-fill-column=            | =80=             | Wrap column; =auto= derives it from the window, =nil= disables |
-| =clatter-sender-format=          | ="<%nick>"=      | Sender prefix; =%nick= is the nickname                       |
-| =clatter-nick-column-width=      | =20=             | Width of the right-aligned nick column                     |
-| =clatter-nick-column-truncate=   | =nil=            | When =t=, clip nicks longer than the column to =<nick…>=  |
-| =clatter-buffer-max-lines=       | =10000=          | Truncate a buffer past this many lines                     |
-| =clatter-buffer-name-style=      | ='full=         | =full=, =network= or =channel= buffer naming                     |
-| =clatter-header-line-preset=     | =nil=            | =topic= or =context= moves channel info to the header line     |
-| =clatter-prompt-format=          | ="%t> "=         | =%t= target, =%n= nick, =%N= network; or a function              |
-| =clatter-prompt-alignment=       | =nil=            | =right= aligns the prompt with the nick column               |
-| =clatter-away-indicator=         | ="@"=            | Marker appended to your nick while away                    |
-| =clatter-bot-label=              | ="[bot]"=        | Label on messages from nicks with bot mode                 |
-| =clatter-display-on-join=        | =t=              | Show the channel buffer when you join                      |
-| =clatter-display-on-welcome=     | =t=              | Show the server buffer after the welcome numeric           |
-| =clatter-receive-query-display=  | ='bury=         | Incoming DM buffers: =bury=, =buffer= or =pop=                   |
+| Variable                             | Default         | Description                                                      |
+|--------------------------------------+-----------------+------------------------------------------------------------------|
+| =clatter-message-order=              | ='newest-first= | Input at top with messages below, or =oldest-first=              |
+| =clatter-timestamp-format=           | ="%H:%M"=       | Timestamp format string                                          |
+| =clatter-timestamp-side=             | ='right=        | =left=/=right= margin, =inline= overlay, =divider= row, or =nil= |
+| =clatter-timestamp-divider-interval= | =1=             | Minutes between =divider= rows                                   |
+| =clatter-timestamp-only-if-changed=  | =nil=           | Show a timestamp only when it differs from the previous          |
+| =clatter-fill-column=                | =80=            | Wrap column; =auto= derives it from the window, =nil= disables   |
+| =clatter-sender-format=              | ="<%nick>"=     | Sender prefix; =%nick= is the nickname                           |
+| =clatter-nick-column-width=          | =20=            | Width of the right-aligned nick column                           |
+| =clatter-nick-column-truncate=       | =nil=           | When =t=, clip nicks longer than the column to =<nick…>=         |
+| =clatter-buffer-max-lines=           | =10000=         | Truncate a buffer past this many lines                           |
+| =clatter-buffer-name-style=          | ='full=         | =full=, =network= or =channel= buffer naming                     |
+| =clatter-header-line-preset=         | =nil=           | =topic= or =context= moves channel info to the header line       |
+| =clatter-prompt-format=              | ="%t> "=        | =%t= target, =%n= nick, =%N= network; or a function              |
+| =clatter-prompt-alignment=           | =nil=           | =right= aligns the prompt with the nick column                   |
+| =clatter-away-indicator=             | ="@"=           | Marker appended to your nick while away                          |
+| =clatter-bot-label=                  | ="[bot]"=       | Label on messages from nicks with bot mode                       |
+| =clatter-display-on-join=            | =t=             | Show the channel buffer when you join                            |
+| =clatter-display-on-welcome=         | =t=             | Show the server buffer after the welcome numeric                 |
+| =clatter-receive-query-display=      | ='bury=         | Incoming DM buffers: =bury=, =buffer= or =pop=                   |
 
 *** Compact system messages
 
