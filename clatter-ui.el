@@ -179,7 +179,12 @@ any intervening line breaks the group but a time gap alone never does."
   "Vertical space between nick groups when message grouping is enabled.
 An integer specifies pixels; a float specifies a multiple of the default
 frame line height.  nil or a non-positive value disables the gap.  Line
-spacing has no effect on text terminals."
+spacing has no effect on text terminals.
+
+With an `oldest-first' bottom prompt, gaps make screen lines taller than
+Emacs's line-granular scrolling can always divide evenly: the pinned
+input stays fully visible but may float up to one line above the window
+bottom while a short history still fills the window."
   :type '(choice (const :tag "No gap" nil)
                  (number :tag "Line spacing"))
   :group 'clatter)
@@ -232,6 +237,33 @@ its final text row while short history grows upward."
        (eq (window-buffer window) (current-buffer))
        (clatter-in-input-p (window-point window))))
 
+(defun clatter--pixel-pin-start (window)
+  "Return the highest window start keeping the input fully visible in WINDOW.
+Walk back one screen line at a time from the input, measuring the real
+pixel height of each candidate range, and stop just before the range
+would exceed the window body.  Moves point; callers wrap in
+`save-excursion'."
+  (let* ((end (clatter--input-end))
+         (body (window-body-height window t))
+         (cand (progn (goto-char end)
+                      (vertical-motion 0 window)
+                      (point)))
+         (best cand)
+         (guard 0))
+    ;; ponytail: linear walk, one pixel measurement per screen line,
+    ;; bounded to 400 lines; plenty for any real window height.
+    (while (and (> cand (point-min)) (< guard 400))
+      (cl-incf guard)
+      (goto-char cand)
+      (vertical-motion -1 window)
+      (let ((prev (point)))
+        (if (or (>= prev cand)
+                (> (cdr (window-text-pixel-size window prev end)) body))
+            (setq cand (point-min))     ; top reached or next line overflows
+          (setq best prev
+                cand prev))))
+    best))
+
 (defun clatter--recenter-input-window (window)
   "Put the final input line at the bottom of WINDOW without moving point."
   (let ((position (window-point window))
@@ -239,9 +271,21 @@ its final text row while short history grows upward."
     (save-selected-window
       (with-selected-window window
         (save-excursion
-          (goto-char (clatter--input-end))
-          (recenter -1)
-          (setq start (window-start window)))))
+          ;; `recenter' walks back with the frame's default line metrics,
+          ;; so `line-spacing' gaps (`clatter-group-messages-gap') make it
+          ;; over- or undershoot by up to one gap per boundary: the input
+          ;; line jitters and can clip off the window bottom as messages
+          ;; arrive.  With gaps enabled, compute the start from measured
+          ;; pixel heights instead; the input then never clips, at the
+          ;; cost of floating below the last line by less than one line
+          ;; when the heights do not divide the window evenly.
+          (if (and clatter-group-messages-by-nick
+                   (numberp clatter-group-messages-gap)
+                   (> clatter-group-messages-gap 0))
+              (setq start (clatter--pixel-pin-start window))
+            (goto-char (clatter--input-end))
+            (recenter -1)
+            (setq start (window-start window))))))
     (when (window-live-p window)
       (set-window-point window position)
       ;; Restoring point can make redisplay choose a different start.  Reapply
