@@ -180,6 +180,36 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
               (should (= (point) (+ (marker-position clatter--input-marker) 2))))
           (remhash (clatter-connection-network-id conn) clatter-connections))))))
 
+(ert-deftest clatter-prompt-refresh-keeps-later-messages-above-prompt ()
+  "A nick refresh must not let the next message land in the input."
+  (let ((clatter-message-order 'oldest-first)
+        (clatter-prompt-format "%n> ")
+        (clatter-prompt-alignment 'right))
+    (with-temp-buffer
+      (clatter-mode)
+      (setq-local clatter--network "testnet")
+      (setq-local clatter--target "#test")
+      (let ((conn (clatter-test-make-connection "testnet" "alice")))
+        (unwind-protect
+            (progn
+              (clatter--setup-prompt (current-buffer))
+              (goto-char (clatter--input-end))
+              (insert "draft")
+              (setf (clatter-connection-nick conn) "knighthk-irc")
+              (clatter--refresh-prompt)
+              (clatter--insert-message (current-buffer) "<trev> now what is HIP!" t)
+              (should (string-match-p "knighthk-irc> "
+                                      (clatter-input-test--prompt)))
+              (should (equal (clatter--get-input) "draft"))
+              (should (<= (marker-position clatter--messages-marker)
+                          (marker-position clatter--prompt-marker)))
+              (should (string-match-p
+                       "now what is HIP!"
+                       (buffer-substring-no-properties
+                        (point-min) clatter--prompt-marker)))
+              (should-not (string-match-p "HIP" (clatter--get-input))))
+          (remhash (clatter-connection-network-id conn) clatter-connections))))))
+
 (ert-deftest clatter-prompt-nick-hook-refreshes-nick-prompts-only ()
   "Own nick changes refresh nick prompts and preserve other prompt formats."
   (let ((conn (clatter-test-make-connection "testnet" "alice"))
@@ -449,7 +479,10 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
           (clatter--set-input "draft")
           (clatter--refresh-prompt)
           (should (equal (clatter--get-input) "draft"))
-          (should (overlayp clatter--typing-indicator-overlay)))))))
+          (should (overlayp clatter--typing-indicator-overlay))
+          (clatter--insert-message (current-buffer) "after-refresh" t)
+          (should (equal (clatter--get-input) "draft"))
+          (should-not (string-match-p "after-refresh" (clatter--get-input))))))))
 
 (ert-deftest clatter-input-typing-separator-bottom-pin-reserves-one-row ()
   "Oldest-first bottom pin accounts for the fixed typing row."
