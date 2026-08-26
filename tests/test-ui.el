@@ -2232,6 +2232,75 @@ ORDER is the `clatter-message-order', CONN the mock connection."
                            (if (eq order 'oldest-first) third-bol second-bol))))))
       (remhash "testnet" clatter-connections))))
 
+(ert-deftest clatter-group-messages-gap-skips-hidden-fools ()
+  "Hidden fool messages neither anchor the gap nor receive it.
+Same visible sender across a hidden fool groups without a gap; a
+different visible sender gets the gap on the previous visible message's
+newline, not on the invisible fool line."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t)
+        (clatter-group-messages-gap 0.25)
+        (clatter-fools-visible nil))
+    (unwind-protect
+        (dolist (order '(oldest-first newest-first))
+          ;; Same sender resumes its group across a hidden fool: no gap.
+          (clatter-test--with-grouping-buffer order conn
+            (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+            (clatter-insert-privmsg (current-buffer) "fool" "foolish" conn
+                                    nil 'clatter-fool)
+            (clatter-insert-privmsg (current-buffer) "alice" "second" conn)
+            (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                  (fool-bol (clatter-test--find-line-bol (current-buffer) "foolish"))
+                  (second-bol (clatter-test--find-line-bol (current-buffer) "second")))
+              ;; Grouped: blank nick column on the later alice line.
+              (should (string-match-p "\\` *\\'"
+                                      (clatter-test--nick-column-at
+                                       (current-buffer) second-bol)))
+              (dolist (bol (list first-bol fool-bol second-bol))
+                (should-not (clatter-test--line-spacing-at
+                             (current-buffer) bol)))))
+          ;; Different sender: gap lands on the visible neighbor's newline.
+          (clatter-test--with-grouping-buffer order conn
+            (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+            (clatter-insert-privmsg (current-buffer) "fool" "foolish" conn
+                                    nil 'clatter-fool)
+            (clatter-insert-privmsg (current-buffer) "bob" "third" conn)
+            (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                  (fool-bol (clatter-test--find-line-bol (current-buffer) "foolish"))
+                  (third-bol (clatter-test--find-line-bol (current-buffer) "third")))
+              (should (equal (clatter-test--line-spacing-at
+                              (current-buffer)
+                              (if (eq order 'oldest-first) first-bol third-bol))
+                             0.25))
+              (should-not (clatter-test--line-spacing-at
+                           (current-buffer) fool-bol))
+              (should-not (clatter-test--line-spacing-at
+                           (current-buffer)
+                           (if (eq order 'oldest-first) third-bol first-bol))))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-group-messages-gap-visible-fools-anchor ()
+  "With fools visible, fool messages anchor grouping and gaps normally."
+  (let ((conn (clatter-test-make-connection "testnet" "me"))
+        (clatter-group-messages-by-nick t)
+        (clatter-group-messages-gap 0.25)
+        (clatter-fools-visible t))
+    (unwind-protect
+        (clatter-test--with-grouping-buffer 'oldest-first conn
+          (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
+          (clatter-insert-privmsg (current-buffer) "fool" "foolish" conn
+                                  nil 'clatter-fool)
+          (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
+                (fool-bol (clatter-test--find-line-bol (current-buffer) "foolish")))
+            ;; The fool broke alice's burst: gap below alice's line.
+            (should (equal (clatter-test--line-spacing-at
+                            (current-buffer) first-bol)
+                           0.25))
+            (should (string-match-p "<fool>"
+                                    (clatter-test--nick-column-at
+                                     (current-buffer) fool-bol)))))
+      (remhash "testnet" clatter-connections))))
+
 (ert-deftest clatter-group-messages-breaks-on-different-nick ()
   "An intervening message from another nick breaks the burst."
   (let ((conn (clatter-test-make-connection "testnet" "me"))

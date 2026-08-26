@@ -576,8 +576,10 @@ BUFFER defaults to the current buffer.  The neighbor is the message
 adjacent to where the next message will insert (see
 `clatter--message-insert-position').  Inserts that push earlier messages
 away leave the neighbor on the line at that position; inserts that append
-after them leave it on the line above.  Returns nil when the position is
-out of range or no message text properties are present there."
+after them leave it on the line above.  Lines currently hidden by
+`buffer-invisibility-spec' (fools, mutes) do not anchor visual grouping
+and are skipped over.  Returns nil when the position is out of range or
+no message text properties are present there."
   (let ((buf (or buffer (current-buffer))))
     (when (buffer-live-p buf)
       (with-current-buffer buf
@@ -586,11 +588,25 @@ out of range or no message text properties are present there."
             (goto-char pos)
             ;; Backlog rendering reverses which side the previous message
             ;; sits on: newest-first appends, oldest-first prepends.
-            (when (eq (and clatter--insert-at-backlog-end t)
-                      (eq clatter-message-order 'newest-first))
-              (forward-line -1))
+            (let ((backward (eq (and clatter--insert-at-backlog-end t)
+                                (eq clatter-message-order 'newest-first)))
+                  (guard 0))
+              (when backward (forward-line -1))
+              ;; Hidden neighbors would bake grouping decisions against
+              ;; text the user cannot see: continue to the nearest visible
+              ;; line in the same direction.
+              ;; ponytail: linear scan capped at 500 hidden lines; a longer
+              ;; hidden run just disables grouping for that message.
+              (while (and (< guard 500)
+                          (invisible-p (line-beginning-position))
+                          (if backward
+                              (> (line-beginning-position) (point-min))
+                            (< (line-end-position) (point-max))))
+                (cl-incf guard)
+                (forward-line (if backward -1 1))))
             (let ((bol (line-beginning-position)))
-              (and (get-text-property bol 'clatter-sender)
+              (and (not (invisible-p bol))
+                   (get-text-property bol 'clatter-sender)
                    bol))))))))
 
 (defun clatter--group-with-previous-p (buffer sender server-time)
@@ -893,6 +909,9 @@ SERVER-TIME overrides the current time for the timestamp."
                (numberp clatter-group-messages-gap)
                (> clatter-group-messages-gap 0)
                (not grouped-p)
+               ;; A currently-hidden message (fool, mute) renders nothing;
+               ;; its gap would just space out the visible neighbors.
+               (not (with-current-buffer buffer (invisible-p invisible)))
                (clatter--previous-message-bol buffer)))
          ;; The newline below the boundary depends on which side of the
          ;; previous message receives the new one.
@@ -966,10 +985,17 @@ SERVER-TIME overrides the current time for the timestamp."
       (setq props (plist-put props 'clatter-self-echo-nonce self-echo-nonce)))
     (when (and group-gap-p (not insert-before-previous-p))
       (with-current-buffer buffer
-        (let ((inhibit-read-only t)
-              (end (clatter--message-insert-position)))
-          (put-text-property (1- end) end
-                             'line-spacing clatter-group-messages-gap))))
+        ;; The gap goes on the previous *visible* message's newline: with
+        ;; hidden lines (fools, mutes) between it and the insert position,
+        ;; the adjacent newline belongs to invisible text and the gap
+        ;; would never render.
+        (when-let* ((inhibit-read-only t)
+                    (bol (clatter--previous-message-bol buffer))
+                    (eol (save-excursion (goto-char bol)
+                                         (line-end-position))))
+          (when (eq (char-after eol) ?\n)
+            (put-text-property eol (1+ eol)
+                               'line-spacing clatter-group-messages-gap)))))
     (clatter--insert-message
      buffer formatted nil props server-time invisible
      (and group-gap-p insert-before-previous-p clatter-group-messages-gap))
