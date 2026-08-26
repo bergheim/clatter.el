@@ -273,6 +273,26 @@ Return non-nil if there was one."
     (dolist (key stale)
       (remhash key clatter--requested-joins))))
 
+(defun clatter-note-join-request (conn channels)
+  "Remember that this session asked CONN to join CHANNELS.
+CHANNELS is the raw JOIN target parameter, so it may name several
+channels separated by commas; each is recorded on its own.  A channel we
+are already in draws no JOIN echo from the server, so display its buffer
+now instead of recording a request that would never be consumed.
+
+This lives here, next to the table it feeds, because every way of asking
+for a join has to share it and they do not share a higher layer:
+`clatter-list' is loaded by `clatter-handlers' and so by `clatter-ui',
+which makes `clatter-ui' unreachable from it."
+  (let ((network (clatter-connection-network-id conn))
+        (nick (clatter-connection-nick conn)))
+    (dolist (channel (split-string channels "," t "[ \t]+"))
+      (let ((buf (clatter-get-buffer network channel)))
+        (if (and buf nick (clatter-nick-member-p buf nick))
+            (when clatter-display-on-join
+              (display-buffer buf))
+          (clatter-record-requested-join network channel))))))
+
 ;; --- Input ring ---
 
 (defvar-local clatter-input-ring nil

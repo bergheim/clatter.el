@@ -2724,15 +2724,20 @@ whichever buffer last issued a query command.")
 (defconst clatter--join-failure-numerics
   '("403"  ; ERR_NOSUCHCHANNEL
     "405"  ; ERR_TOOMANYCHANNELS
+    "437"  ; ERR_UNAVAILRESOURCE
     "471"  ; ERR_CHANNELISFULL
     "473"  ; ERR_INVITEONLYCHAN
     "474"  ; ERR_BANNEDFROMCHAN
     "475"  ; ERR_BADCHANNELKEY
-    "476")  ; ERR_BADCHANMASK
+    "476"  ; ERR_BADCHANMASK
+    "477"  ; ERR_NEEDREGGEDNICK
+    "489")  ; ERR_SECUREONLYCHAN
   "Numerics that refuse a JOIN.
-Each names the channel in its second parameter.  A refused join draws no
-JOIN echo, so its pending request in `clatter--requested-joins' has to be
-dropped here or a later unsolicited join would inherit the display.")
+Each names the channel in its second parameter, except 437, which names
+a nick when it refuses a NICK instead of a JOIN -- harmless, the consume
+then simply matches nothing.  A refused join draws no JOIN echo, so its
+pending request in `clatter--requested-joins' has to be dropped here or a
+later unsolicited join would inherit the display.")
 
 (defun clatter--query-target (conn)
   "Return the live buffer to route query replies to on CONN, or nil.
@@ -2768,6 +2773,15 @@ COMMAND is the numeric reply code, PARAMS its parameters on CONN."
                (stringp (nth 1 params)))
       (clatter-consume-requested-join (clatter-connection-network-id conn)
                                       (nth 1 params)))
+    ;; 470 ERR_LINKCHANNEL: (nick REQUESTED ACTUAL "Forwarding to another
+    ;; channel").  The JOIN echo names ACTUAL, so hand the request over or
+    ;; a channel we asked for by name would never display.
+    (when (and (equal command "470")
+               (stringp (nth 1 params))
+               (stringp (nth 2 params)))
+      (let ((network (clatter-connection-network-id conn)))
+        (when (clatter-consume-requested-join network (nth 1 params))
+          (clatter-record-requested-join network (nth 2 params)))))
     ;; Route replies to user-initiated query commands (/who, /stats,
     ;; /lusers, ...) to the buffer the command was typed in, when it is
     ;; still live.  Falls through to the pcase below otherwise (e.g. the

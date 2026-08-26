@@ -138,10 +138,11 @@ Each entry is (CHANNEL USERS TOPIC).")
                                       (current-buffer))))
         (when conn ;; When the current buffer is the buffer list
           (clatter-send conn (format "JOIN %s" channel))
-          ;; Picking a channel here is as explicit as typing /join, so the
-          ;; JOIN echo may display its buffer.
-          (clatter-record-requested-join
-           (clatter-connection-network-id conn) channel)
+          ;; Picking a channel here is as explicit as typing /join, so it
+          ;; goes through the same bookkeeping: the JOIN echo may display
+          ;; the buffer, and a channel we are already in is displayed now
+          ;; because no echo is coming for it.
+          (clatter-note-join-request conn channel)
           (message "Joining %s..." channel))))))
 
 (defun clatter-list-refresh ()
