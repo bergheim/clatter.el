@@ -26,8 +26,11 @@
 
 ;; --- Faces ---
 
-(defvar-local clatter--last-formatted-timestamp nil
-  "Last formatted message timestamp in the current Clatter buffer.")
+(defvar-local clatter--last-timestamp-key nil
+  "Coalescing key of the last timestamped message in this buffer.
+The formatted timestamp in margin mode, or the divider bucket from
+`clatter--timestamp-divider-key' when `clatter-timestamp-side' is
+`divider'.")
 
 ;; Clatter faces inherit from standard theme faces (font-lock-*,
 ;; error, success) rather than hardcoding hex colors, so they stay legible
@@ -633,6 +636,27 @@ column is too narrow to wrap past the nick indent."
          (when (> col floor-col) col)))
       (col (when (and (integerp col) (> col floor-col)) col)))))
 
+(defun clatter--timestamp-margin-p ()
+  "Return non-nil when timestamps use a window margin."
+  (memq clatter-timestamp-side '(left right)))
+
+(defun clatter--timestamp-divider-spoken-p (msg-props invisible)
+  "Return non-nil when this insert can own a minute-divider row."
+  (and (eq clatter-timestamp-side 'divider)
+       (not invisible)
+       (memq (plist-get msg-props 'clatter-msg-type) '(privmsg action))))
+
+(defun clatter--timestamp-divider-key (time)
+  "Return the divider bucket key for TIME.
+Minutes are floored to `clatter-timestamp-divider-interval' so a value
+of 10 yields one row per ten-minute clock mark."
+  (let ((interval (max 1 clatter-timestamp-divider-interval))
+        (dec (decode-time time)))
+    (setf (decoded-time-second dec) 0
+          (decoded-time-minute dec)
+          (* interval (/ (decoded-time-minute dec) interval)))
+    (format-time-string clatter-timestamp-format (encode-time dec))))
+
 (defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible message-line-spacing)
   "Insert formatted TEXT into BUFFER.
 Adds timestamp unless NO-TIMESTAMP is non-nil.
@@ -658,10 +682,24 @@ append at the bottom like a traditional IRC client."
             (let* ((formatted-timestamp
                     (unless no-timestamp
                       (format-time-string clatter-timestamp-format time)))
+                   (spoken-div-p
+                    (clatter--timestamp-divider-spoken-p msg-props invisible))
+                   ;; Coalescing key: the formatted value rather than the raw
+                   ;; time, so formats without seconds coalesce correctly and
+                   ;; each buffer keeps its own timestamp run.  Divider mode
+                   ;; only keys spoken lines, so joins/parts cannot open a
+                   ;; new minute row.
+                   (ts-key (and formatted-timestamp
+                                (if (eq clatter-timestamp-side 'divider)
+                                    (and spoken-div-p
+                                         (clatter--timestamp-divider-key time))
+                                  formatted-timestamp)))
+                   (ts-changed-p
+                    (not (equal ts-key clatter--last-timestamp-key)))
                    (ts-str (and formatted-timestamp
+                                (clatter--timestamp-margin-p)
                                 (or (not clatter-timestamp-only-if-changed)
-                                    (not (equal formatted-timestamp
-                                                clatter--last-formatted-timestamp)))
+                                    ts-changed-p)
                                 formatted-timestamp))
                    (ts-tooltip-str
                     (unless no-timestamp
@@ -669,12 +707,22 @@ append at the bottom like a traditional IRC client."
                         (format-time-string clatter-timestamp-tooltip-format time))))
                    (wrap-col (1+ clatter-nick-column-width))
                    (wrap-prefix (make-string wrap-col ?\s))
-                   (start (point)))
-              ;; Remember the formatted value, rather than the raw time, so
-              ;; formats without seconds coalesce correctly and each buffer
-              ;; keeps its own timestamp run.
-              (when formatted-timestamp
-                (setq clatter--last-formatted-timestamp formatted-timestamp))
+                   (line-props (list 'read-only t
+                                     'front-sticky t
+                                     'wrap-prefix wrap-prefix
+                                     'line-prefix ""))
+                   start)
+              (when ts-key
+                (setq clatter--last-timestamp-key ts-key))
+              (when (and spoken-div-p ts-key ts-changed-p)
+                (let ((div-start (point)))
+                  (insert (propertize (format "— %s —" formatted-timestamp)
+                                      'face 'clatter-timestamp
+                                      'clatter-timestamp-divider t
+                                      'help-echo ts-tooltip-str)
+                          "\n")
+                  (add-text-properties div-start (point) line-props)))
+              (setq start (point))
               (insert text "\n")
               (when message-line-spacing
                 (put-text-property (1- (point)) (point)
@@ -687,25 +735,20 @@ append at the bottom like a traditional IRC client."
                     (fill-region start (1- (point))))))
               (when ts-str
                 (let ((ov (make-overlay start (1+ start) nil t)))
-                  (when clatter-timestamp-side
-                    (overlay-put ov 'before-string
-                                 ;; Apply 'default face after 'clatter-timestamp to ensure that no
-                                 ;; unwanted face properties are inherited from text which might be
-                                 ;; at point.
-                                 (propertize " " 'display
-                                             `((margin ,(if (eq clatter-timestamp-side 'left)
-                                                            'left-margin
-                                                          'right-margin))
-                                               ,(propertize ts-str
-                                                            'face '(clatter-timestamp default)
-                                                            'help-echo ts-tooltip-str)))))
+                  (overlay-put ov 'before-string
+                               ;; Apply 'default face after 'clatter-timestamp to ensure that no
+                               ;; unwanted face properties are inherited from text which might be
+                               ;; at point.
+                               (propertize " " 'display
+                                           `((margin ,(if (eq clatter-timestamp-side 'left)
+                                                          'left-margin
+                                                        'right-margin))
+                                             ,(propertize ts-str
+                                                          'face '(clatter-timestamp default)
+                                                          'help-echo ts-tooltip-str))))
                   (overlay-put ov 'clatter-timestamp t)
                   (overlay-put ov 'invisible invisible)))
-              (add-text-properties start (point)
-                                   (list 'read-only t
-                                         'front-sticky t
-                                         'wrap-prefix wrap-prefix
-                                         'line-prefix ""))
+              (add-text-properties start (point) line-props)
               (when msg-props
                 (add-text-properties start (point) msg-props))
               (when (clatter--fool-invisibility-p invisible)
@@ -1085,7 +1128,7 @@ identical messages sent close together each reconcile only one local line."
                                            'clatter-text text))
                 (when msgid
                   (put-text-property start end 'clatter-msgid msgid))
-                (when server-time
+                (when (and server-time (clatter--timestamp-margin-p))
                   (dolist (overlay (overlays-at start))
                     (when (overlay-get overlay 'clatter-timestamp)
                       (overlay-put overlay 'before-string

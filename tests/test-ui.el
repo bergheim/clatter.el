@@ -534,7 +534,76 @@ always showing fool messages."
       (let ((clatter-timestamp-side nil))
         (clatter--sync-window-margins)
         (should-not (car (window-margins)))
+        (should-not (cdr (window-margins))))
+      (let ((clatter-timestamp-side 'divider))
+        (clatter--sync-window-margins)
+        (should-not (car (window-margins)))
         (should-not (cdr (window-margins)))))))
+
+(defun clatter-test--divider-positions ()
+  "Return buffer positions of minute-divider lines."
+  (clatter--navigation-property-positions 'clatter-timestamp-divider))
+
+(ert-deftest clatter-test-timestamp-divider-no-margin ()
+  "Divider timestamps do not reserve a window margin."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M"))
+    (with-temp-buffer
+      (clatter-mode)
+      (should (= left-margin-width 0))
+      (should (= right-margin-width 0)))))
+
+(ert-deftest clatter-test-timestamp-divider-spoken-only-and-coalesced ()
+  "Minute rows fire once per spoken minute and never for system lines."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (conn (clatter-test-make-connection))
+        (t1 (encode-time 30 12 10 1 1 2026))
+        (t1b (encode-time 59 12 10 1 1 2026))
+        (t2 (encode-time 0 13 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "hi" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "again" conn t1b)
+          (clatter-insert-system (current-buffer) "noise")
+          (clatter-insert-privmsg (current-buffer) "bob" "yo" conn t2)
+          (should (= 2 (length (clatter-test--divider-positions))))
+          (should (string-match-p "— 10:12 —" (buffer-string)))
+          (should (string-match-p "— 10:13 —" (buffer-string)))
+          (let ((pos (clatter-test--divider-positions)))
+            (should-not (eq (line-number-at-pos (nth 1 pos))
+                            (1+ (line-number-at-pos (nth 0 pos)))))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-divider-skips-silence ()
+  "System traffic alone never inserts a minute row."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M"))
+    (with-temp-buffer
+      (clatter-insert-system (current-buffer) "join")
+      (clatter-insert-system (current-buffer) "part")
+      (should-not (clatter-test--divider-positions)))))
+
+(ert-deftest clatter-test-timestamp-divider-respects-interval ()
+  "Divider rows fire once per interval-sized clock bucket."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-divider-interval 10)
+        (clatter-timestamp-format "%H:%M")
+        (conn (clatter-test-make-connection))
+        (t1 (encode-time 0 12 10 1 1 2026))
+        (t2 (encode-time 0 19 10 1 1 2026))
+        (t3 (encode-time 0 22 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "a" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "b" conn t2)
+          (clatter-insert-privmsg (current-buffer) "bob" "c" conn t3)
+          (should (= 2 (length (clatter-test--divider-positions))))
+          (should (string-match-p "— 10:12 —" (buffer-string)))
+          (should-not (string-match-p "— 10:19 —" (buffer-string)))
+          (should (string-match-p "— 10:22 —" (buffer-string))))
+      (clatter-test-cleanup))))
 
 ;; --- Message filling ---
 
