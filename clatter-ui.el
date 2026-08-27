@@ -28,9 +28,8 @@
 
 (defvar-local clatter--last-timestamp-key nil
   "Coalescing key of the last timestamped message in this buffer.
-The formatted timestamp in margin mode, or the divider bucket from
-`clatter--timestamp-divider-key' when `clatter-timestamp-side' is
-`divider'.")
+The bucket key from `clatter--timestamp-bucket-key', shared by every
+timestamp side.")
 
 ;; Clatter faces inherit from standard theme faces (font-lock-*,
 ;; error, success) rather than hardcoding hex colors, so they stay legible
@@ -705,16 +704,19 @@ rule as at insert time."
           (clatter--timestamp-overlay-apply
            ov ts-str (overlay-get ov 'clatter-timestamp-tooltip)))))))
 
-(defun clatter--timestamp-divider-key (time)
-  "Return the divider bucket key for TIME.
-Minutes are floored to `clatter-timestamp-divider-interval' so a value
-of 10 yields one row per ten-minute clock mark."
-  (let ((interval (max 1 clatter-timestamp-divider-interval))
-        (dec (decode-time time)))
-    (setf (decoded-time-second dec) 0
-          (decoded-time-minute dec)
-          (* interval (/ (decoded-time-minute dec) interval)))
-    (format-time-string clatter-timestamp-format (encode-time dec))))
+(defun clatter--timestamp-bucket-key (time)
+  "Return the coalescing key for TIME, shared by every timestamp side.
+At `clatter-timestamp-interval' 1 this is the formatted timestamp, so
+marks follow the displayed value.  Above 1, minutes are floored to the
+interval: a value of 10 yields one mark per ten-minute clock bucket."
+  (if (<= clatter-timestamp-interval 1)
+      (format-time-string clatter-timestamp-format time)
+    (let ((dec (decode-time time)))
+      (setf (decoded-time-second dec) 0
+            (decoded-time-minute dec)
+            (* clatter-timestamp-interval
+               (/ (decoded-time-minute dec) clatter-timestamp-interval)))
+      (format-time-string clatter-timestamp-format (encode-time dec)))))
 
 (defun clatter--timestamp-divider-insert-row (formatted tooltip line-props
                                                         &optional invisible)
@@ -755,7 +757,7 @@ the same bucket does not open a second, adjacent row."
                  'wrap-prefix (make-string (1+ clatter-nick-column-width) ?\s)
                  'line-prefix "")))
         (setq clatter--last-timestamp-key
-              (clatter--timestamp-divider-key time))))))
+              (clatter--timestamp-bucket-key time))))))
 
 (defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible message-line-spacing)
   "Insert formatted TEXT into BUFFER.
@@ -782,12 +784,8 @@ append at the bottom like a traditional IRC client."
             (let* ((formatted-timestamp
                     (unless no-timestamp
                       (format-time-string clatter-timestamp-format time)))
-                   ;; Key on the formatted value so formats without seconds
-                   ;; coalesce.
                    (ts-key (and formatted-timestamp
-                                (if (eq clatter-timestamp-side 'divider)
-                                    (clatter--timestamp-divider-key time)
-                                  formatted-timestamp)))
+                                (clatter--timestamp-bucket-key time)))
                    (ts-changed-p
                     (not (equal ts-key clatter--last-timestamp-key)))
                    (ts-str (and formatted-timestamp

@@ -666,6 +666,24 @@ always showing fool messages."
                             (1+ (line-number-at-pos (nth 0 pos)))))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-timestamp-margin-respects-interval ()
+  "With only-if-changed, margin stamps coalesce to interval buckets too."
+  (let ((clatter-timestamp-side 'right)
+        (clatter-timestamp-only-if-changed t)
+        (clatter-timestamp-interval 10)
+        (clatter-timestamp-format "%H:%M")
+        (conn (clatter-test-make-connection))
+        (t1 (encode-time 0 12 10 1 1 2026))
+        (t2 (encode-time 0 19 10 1 1 2026))
+        (t3 (encode-time 0 22 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "a" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "b" conn t2)
+          (clatter-insert-privmsg (current-buffer) "bob" "c" conn t3)
+          (should (= 2 (clatter-test--timestamp-overlay-count))))
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-timestamp-divider-rows-for-system-lines ()
   "System lines open rows like any stamped line, coalesced per bucket."
   (let ((clatter-timestamp-side 'divider)
@@ -698,7 +716,7 @@ always showing fool messages."
 (ert-deftest clatter-test-timestamp-divider-respects-interval ()
   "Divider rows fire once per interval-sized clock bucket."
   (let ((clatter-timestamp-side 'divider)
-        (clatter-timestamp-divider-interval 10)
+        (clatter-timestamp-interval 10)
         (clatter-timestamp-format "%H:%M")
         (conn (clatter-test-make-connection))
         (t1 (encode-time 0 12 10 1 1 2026))
@@ -718,7 +736,7 @@ always showing fool messages."
 (ert-deftest clatter-test-timestamp-divider-seeds-on-setup ()
   "A new buffer opens with a divider row; same-bucket messages reuse it."
   (let ((clatter-timestamp-side 'divider)
-        (clatter-timestamp-divider-interval 10)
+        (clatter-timestamp-interval 10)
         (clatter-timestamp-format "%H:%M")
         (conn (clatter-test-make-connection))
         (now (encode-time 0 12 10 1 1 2026))
