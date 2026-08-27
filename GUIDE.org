@@ -942,14 +942,14 @@ marker manually. Requires the =server-time=, =batch= and =message-tags=
 capabilities, which clatter negotiates by default.
 
 Batched playback - CHATHISTORY, ZNC playback, anything using IRCv3 BATCH -
-renders with full-window divider faces whose labels stay centered when the
-window is resized or the buffer is shown at different widths:
+renders with window-wide divider lines whose labels stay centered as the
+window is resized:
 
 #+begin_example
-                         ── history ──
+────────────────────────────── history ──────────────────────────────
 10:15        <alice> hey everyone
 10:16          <bob> morning!
-                  ── end of history (2 messages) ──
+──────────────────── end of history (2 messages) ────────────────────
 #+end_example
 
 ** Nick Completion

@@ -1648,11 +1648,14 @@ Both message orders keep the page's own messages in display order."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
-(ert-deftest clatter-test-history-bar-string-matches-width ()
-  "The painted rule is exactly WIDTH columns, label included."
-  (let ((bar (clatter--history-bar-string "history" 40)))
-    (should (= 40 (string-width bar)))
-    (should (string-match-p "history" bar))))
+(ert-deftest clatter-test-history-bar-stretches-to-window ()
+  "The bar centers its label and fills the window via display specs."
+  (let ((bar (clatter--history-bar "history")))
+    (should (string-match-p "history" bar))
+    (should (equal '(space :align-to right)
+                   (get-text-property (1- (length bar)) 'display bar)))
+    (should (pcase (get-text-property 0 'display bar)
+              (`(space :align-to (- center ,(pred integerp))) t)))))
 
 ;; --- Typing indicators ---
 
