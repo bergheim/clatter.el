@@ -528,10 +528,10 @@ per-target buffers created by clatter.  Possible values:
            the network qualifier.
   channel  `TARGET' (for example `#foo'): use only the target name,
            with no `clatter:'/network prefix and no surrounding
-           asterisks.  Reads as a bare channel or nick name, but
-           note that the same channel or nick on two networks would
-           collide into one buffer name; prefer this only when you
-           connect to a single network."
+           asterisks.  Server buffers remain network-qualified because
+           every network uses the `*server*' target.  The same channel
+           or nick on two networks can still collide; prefer this style
+           only when those targets are unique."
   :type '(choice (const :tag "*clatter:NETWORK/TARGET*" full)
                  (const :tag "*NETWORK/TARGET*" network)
                  (const :tag "TARGET (e.g. #foo)" channel))

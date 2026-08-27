@@ -8,6 +8,15 @@
 (require 'clatter-nicklist)
 (require 'clatter-pals)
 
+(ert-deftest clatter-buffer-name-channel-style-qualifies-server-buffers ()
+  "Channel-style server buffers retain their network names."
+  (let ((clatter-buffer-name-style 'channel))
+    (should (equal (clatter-server-buffer-name "libera")
+                   "*libera/*server**"))
+    (should (equal (clatter-server-buffer-name "ergo")
+                   "*ergo/*server**"))
+    (should (equal (clatter-buffer-name "libera" "#emacs") "#emacs"))))
+
 (ert-deftest clatter-navigation-orders-messages-and-interactive-items ()
   "Navigation visits a message, its link, then the following message."
   (with-temp-buffer
