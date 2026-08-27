@@ -663,6 +663,31 @@ always showing fool messages."
           (should (string-match-p "— 10:22 —" (buffer-string))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-timestamp-divider-seeds-on-setup ()
+  "A new buffer opens with a divider row; same-bucket messages reuse it."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-divider-interval 10)
+        (clatter-timestamp-format "%H:%M")
+        (conn (clatter-test-make-connection))
+        (now (encode-time 0 12 10 1 1 2026))
+        (later (encode-time 0 22 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-mode)
+          (setq-local clatter--network "testnet")
+          (setq-local clatter--target "#test")
+          (cl-letf (((symbol-function 'current-time) (lambda () now)))
+            (clatter-ui-setup-buffer (current-buffer)))
+          (should (= 1 (length (clatter-test--divider-positions))))
+          (should (string-match-p "— 10:12 —" (buffer-string)))
+          ;; Same bucket: the seeded row is reused, no adjacent duplicate.
+          (clatter-insert-privmsg (current-buffer) "alice" "hi" conn now)
+          (should (= 1 (length (clatter-test--divider-positions))))
+          ;; A later bucket still opens a new row.
+          (clatter-insert-privmsg (current-buffer) "bob" "yo" conn later)
+          (should (= 2 (length (clatter-test--divider-positions)))))
+      (clatter-test-cleanup))))
+
 ;; --- Message filling ---
 
 (ert-deftest clatter-test-insert-message-fills-at-fill-column ()

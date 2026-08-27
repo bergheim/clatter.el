@@ -709,6 +709,43 @@ of 10 yields one row per ten-minute clock mark."
           (* interval (/ (decoded-time-minute dec) interval)))
     (format-time-string clatter-timestamp-format (encode-time dec))))
 
+(defun clatter--timestamp-divider-insert-row (formatted tooltip line-props)
+  "Insert a minute-divider row for FORMATTED time at point.
+TOOLTIP becomes the row's help-echo; LINE-PROPS cover the whole row."
+  (let ((start (point)))
+    (insert (propertize (format "— %s —" formatted)
+                        'face 'clatter-timestamp
+                        'clatter-timestamp-divider t
+                        'help-echo tooltip)
+            "\n")
+    (add-text-properties start (point) line-props)))
+
+(defun clatter--timestamp-divider-seed (buffer)
+  "Insert an opening minute-divider row in BUFFER at the current time.
+Without it a quiet buffer shows no time at all until the first spoken
+message.  Seeds `clatter--last-timestamp-key' so a message arriving in
+the same bucket does not open a second, adjacent row."
+  (when (and (eq clatter-timestamp-side 'divider)
+             clatter-timestamp-format)
+    (with-current-buffer buffer
+      (let* ((inhibit-read-only t)
+             (buffer-undo-list t)
+             (time (current-time))
+             (formatted (format-time-string clatter-timestamp-format time))
+             (tooltip (and clatter-timestamp-tooltip-format
+                           (format-time-string
+                            clatter-timestamp-tooltip-format time))))
+        (save-excursion
+          (goto-char (clatter--message-insert-position))
+          (clatter--timestamp-divider-insert-row
+           formatted tooltip
+           (list 'read-only t
+                 'front-sticky t
+                 'wrap-prefix (make-string (1+ clatter-nick-column-width) ?\s)
+                 'line-prefix "")))
+        (setq clatter--last-timestamp-key
+              (clatter--timestamp-divider-key time))))))
+
 (defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible message-line-spacing)
   "Insert formatted TEXT into BUFFER.
 Adds timestamp unless NO-TIMESTAMP is non-nil.
@@ -769,13 +806,8 @@ append at the bottom like a traditional IRC client."
               (when ts-key
                 (setq clatter--last-timestamp-key ts-key))
               (when (and spoken-div-p ts-key ts-changed-p)
-                (let ((div-start (point)))
-                  (insert (propertize (format "— %s —" formatted-timestamp)
-                                      'face 'clatter-timestamp
-                                      'clatter-timestamp-divider t
-                                      'help-echo ts-tooltip-str)
-                          "\n")
-                  (add-text-properties div-start (point) line-props)))
+                (clatter--timestamp-divider-insert-row
+                 formatted-timestamp ts-tooltip-str line-props))
               (setq start (point))
               (insert text "\n")
               (when message-line-spacing
@@ -2076,6 +2108,7 @@ connected (the common case) or absent."
     (add-hook 'visible-mode-hook
               #'clatter--refresh-compact-system-layout nil t)
     (clatter--setup-prompt buffer)
+    (clatter--timestamp-divider-seed buffer)
     ;; Add mode-line.  Optionally include the activity crumbs (see
     ;; `clatter-track-show-in-clatter-buffers') so they are visible while
     ;; inside a clatter buffer, not just in the global mode line.
