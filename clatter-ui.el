@@ -675,15 +675,19 @@ TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
         ;; Stamp sits on the message's last row; one that doesn't fit is
         ;; dropped.  No fresh-row fallback: an overlay-string row has no
         ;; buffer position of its own, so point can't land on it and
-        ;; vertical motion gets trapped.
-        (overlay-put ov 'before-string
-                     (unless (clatter--timestamp-inline-break-p
-                              (overlay-start ov) ts-str)
-                       (concat (propertize
-                                " " 'display
-                                `(space :align-to
-                                        (- right ,(string-width ts-str))))
-                               stamp)))
+        ;; vertical motion gets trapped.  Keep the raw stamp on the
+        ;; overlay so `clatter--timestamp-inline-refresh-at' can re-fit.
+        (progn
+          (overlay-put ov 'clatter-timestamp-str ts-str)
+          (overlay-put ov 'clatter-timestamp-tooltip tooltip)
+          (overlay-put ov 'before-string
+                       (unless (clatter--timestamp-inline-break-p
+                                (overlay-start ov) ts-str)
+                         (concat (propertize
+                                  " " 'display
+                                  `(space :align-to
+                                     (- right ,(string-width ts-str))))
+                                 stamp))))
       ;; Apply 'default face after 'clatter-timestamp so no unwanted face
       ;; properties are inherited from text which might be at point.
       (overlay-put ov 'before-string
@@ -692,6 +696,19 @@ TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
                                               'left-margin
                                             'right-margin))
                                  ,stamp))))))
+
+(defun clatter--timestamp-inline-refresh-at (eol)
+  "Re-fit the inline stamp on the line ending at EOL.
+Compact system groups change a line after its stamp's fit was decided —
+appends lengthen it, visibility toggles change its displayed width — so
+apply the stamp again: the fit check drops or restores it, the same
+rule as at insert time."
+  (when (eq clatter-timestamp-side 'inline)
+    (dolist (ov (overlays-at eol))
+      (when (overlay-get ov 'clatter-timestamp)
+        (when-let* ((ts-str (overlay-get ov 'clatter-timestamp-str)))
+          (clatter--timestamp-overlay-apply
+           ov ts-str (overlay-get ov 'clatter-timestamp-tooltip)))))))
 
 (defun clatter--timestamp-divider-spoken-p (msg-props invisible)
   "Return non-nil when this insert can own a minute-divider row."
@@ -784,11 +801,7 @@ append at the bottom like a traditional IRC client."
                    (ts-changed-p
                     (not (equal ts-key clatter--last-timestamp-key)))
                    (ts-str (and formatted-timestamp
-                                ;; Margin modes stamp every line; inline
-                                ;; stamps only spoken ones.
-                                (if (eq clatter-timestamp-side 'inline)
-                                    (clatter--timestamp-spoken-p msg-props invisible)
-                                  (clatter--timestamp-margin-p))
+                                (clatter--timestamp-overlay-p)
                                 (or (not clatter-timestamp-only-if-changed)
                                     ts-changed-p)
                                 formatted-timestamp))
@@ -1412,7 +1425,9 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
             (when any-visible
               (remove-text-properties group-start first-event-start
                                       '(display nil))))
-          (dolist (overlay (overlays-at group-start))
+          (dolist (overlay (append (overlays-at group-start)
+                                   (and newline-position
+                                        (overlays-at newline-position))))
             (when (overlay-get overlay 'clatter-timestamp)
               (overlay-put
                overlay 'invisible
@@ -1429,6 +1444,8 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
                newline-position group-end 'invisible
                (and first-event-start
                     (get-text-property first-event-start 'invisible)))))
+          (when newline-position
+            (clatter--timestamp-inline-refresh-at newline-position))
           (setq position group-end)))
       (clatter--refresh-input-spacers (current-buffer)))))
 
@@ -1531,7 +1548,8 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
                            'wrap-prefix
                            (make-string (1+ clatter-nick-column-width) ?\s)
                            'line-prefix ""))
-                    (set-marker tail (point))))
+                    (set-marker tail (point))
+                    (clatter--timestamp-inline-refresh-at (point))))
                 (when (and pre-input clatter--input-marker)
                   (clatter--update-undo-list
                    (- (marker-position clatter--input-marker) pre-input)))
@@ -1568,7 +1586,8 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
                 (put-text-property end (min (1+ end) (point-max))
                                    'invisible
                                    (clatter--compact-system-visibility invisible))
-                (dolist (overlay (overlays-at start))
+                (dolist (overlay (append (overlays-at start)
+                                         (overlays-at end)))
                   (when (overlay-get overlay 'clatter-timestamp)
                     (overlay-put overlay 'invisible invisible)
                     (overlay-put overlay 'clatter-compact-system-invisible
@@ -2883,85 +2902,85 @@ COMMAND is the numeric reply code, PARAMS its parameters on CONN."
         (clatter-insert-system
          query-buf (format "[%s] %s" command (string-join (cdr params) " ")))
         (cl-return-from clatter-ui--on-numeric)))
-  (pcase command
-    ;; --- Informational numerics ---
-    ((or "001" "002" "003" "004" "242" "251" "252" "253" "254" "255"
-         "265" "266")
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network)))
-       (when buf
-         (clatter-insert-system buf (string-join (cdr params) " ")))))
-    ((or "305" "306") ;  RPL_UNAWAY, RPL_NOWAWAY
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network))
-            (msg (string-join (cdr params) " ")))
-       (when buf
-         (clatter-insert-system buf msg))
-       (dolist (buf (clatter-channel-buffers network))
-         (clatter-insert-system buf msg)))
-     (when (clatter--prompt-format-needs-away-p)
-       (clatter--refresh-prompt)))
-    ;; --- MODE numerics ---
-    ("221"   ; RPL_UMODEIS
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network))
-            (nick (nth 0 params))
-            (modes (nth 1 params)))
-       (when buf
-         (clatter-insert-system buf (format "%s is %s" nick modes)))))
-    ("324"   ; RPL_CHANNELMODEIS
-     (let* ((network (clatter-connection-network-id conn))
-            (channel (nth 1 params))
-            (buf (clatter-get-buffer network channel))
-            (modes (nth 2 params)))
-       (when buf
-         (clatter-set-channel-modes buf modes)
-         (clatter-insert-system buf (format "%s is %s" channel modes)))))
-    ("329"   ; RPL_CREATIONTIME
-     (let* ((network (clatter-connection-network-id conn))
-            (channel (nth 1 params))
-            (buf (clatter-get-buffer network channel))
-            (ctime (string-to-number (nth 2 params))))
-       (when buf
-         (clatter-insert-system
-          buf (format "%s was created at %s"
-                      channel (format-time-string "%F %T" ctime))))))
-    ((or "401" "403"  ; ERR_NOSUCHNICK, ERR_NOSUCHCHANNEL
-         "404"        ; ERR_CANNOTSENDTOCHAN
-         "475")       ; ERR_BADCHANNELKEY
-     ;; Route to the buffer named by the reply's target param (a query
-     ;; buffer for 401's nick, a channel buffer for the others), falling
-     ;; back to the server buffer.  Do not use (current-buffer): the
-     ;; process filter may run in any buffer.
-     (let* ((network (clatter-connection-network-id conn))
-            (target (nth 1 params))
-            (buf (or (clatter-get-buffer network target)
-                     (clatter-get-server-buffer network))))
-       (when buf
-         (clatter-insert-system buf (string-join (reverse (cdr params)) " ")))))
-    ("421"                            ; ERR_UNKNOWNCOMMAND
-     ;; The server rejected a command we sent.  If it was TAGMSG, the
-     ;; server (or an upstream behind a bouncer/bridge) ACKed message-tags
-     ;; but does not actually accept TAGMSG; remember that so outbound
-     ;; typing/reaction TAGMSGs stop rather than spamming 421s every
-     ;; keystroke.  Still display the error so the user sees it once.
-     (let ((rejected-cmd (nth 1 params)))
-       (when (string-equal (and rejected-cmd (upcase rejected-cmd)) "TAGMSG")
-         (setf (clatter-connection-tagmsg-rejected conn) t)))
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network)))
-       (when buf
-         (clatter-insert-system
-          buf (format "[%s] %s" command (string-join (cdr params) " "))))))
-    ;; Catch-all: show any unhandled numeric (e.g. 421 ERR_UNKNOWNCOMMAND,
-    ;; 411/412/432/433/461/471-477 ...) in the server buffer instead of
-    ;; silently dropping it.
-    (_
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network)))
-       (when buf
-         (clatter-insert-system
-          buf (format "[%s] %s" command (string-join (cdr params) " "))))))))
+    (pcase command
+      ;; --- Informational numerics ---
+      ((or "001" "002" "003" "004" "242" "251" "252" "253" "254" "255"
+           "265" "266")
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network)))
+         (when buf
+           (clatter-insert-system buf (string-join (cdr params) " ")))))
+      ((or "305" "306") ;  RPL_UNAWAY, RPL_NOWAWAY
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network))
+              (msg (string-join (cdr params) " ")))
+         (when buf
+           (clatter-insert-system buf msg))
+         (dolist (buf (clatter-channel-buffers network))
+           (clatter-insert-system buf msg)))
+       (when (clatter--prompt-format-needs-away-p)
+         (clatter--refresh-prompt)))
+      ;; --- MODE numerics ---
+      ("221"   ; RPL_UMODEIS
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network))
+              (nick (nth 0 params))
+              (modes (nth 1 params)))
+         (when buf
+           (clatter-insert-system buf (format "%s is %s" nick modes)))))
+      ("324"   ; RPL_CHANNELMODEIS
+       (let* ((network (clatter-connection-network-id conn))
+              (channel (nth 1 params))
+              (buf (clatter-get-buffer network channel))
+              (modes (nth 2 params)))
+         (when buf
+           (clatter-set-channel-modes buf modes)
+           (clatter-insert-system buf (format "%s is %s" channel modes)))))
+      ("329"   ; RPL_CREATIONTIME
+       (let* ((network (clatter-connection-network-id conn))
+              (channel (nth 1 params))
+              (buf (clatter-get-buffer network channel))
+              (ctime (string-to-number (nth 2 params))))
+         (when buf
+           (clatter-insert-system
+            buf (format "%s was created at %s"
+                        channel (format-time-string "%F %T" ctime))))))
+      ((or "401" "403"  ; ERR_NOSUCHNICK, ERR_NOSUCHCHANNEL
+           "404"        ; ERR_CANNOTSENDTOCHAN
+           "475")       ; ERR_BADCHANNELKEY
+       ;; Route to the buffer named by the reply's target param (a query
+       ;; buffer for 401's nick, a channel buffer for the others), falling
+       ;; back to the server buffer.  Do not use (current-buffer): the
+       ;; process filter may run in any buffer.
+       (let* ((network (clatter-connection-network-id conn))
+              (target (nth 1 params))
+              (buf (or (clatter-get-buffer network target)
+                       (clatter-get-server-buffer network))))
+         (when buf
+           (clatter-insert-system buf (string-join (reverse (cdr params)) " ")))))
+      ("421"                            ; ERR_UNKNOWNCOMMAND
+       ;; The server rejected a command we sent.  If it was TAGMSG, the
+       ;; server (or an upstream behind a bouncer/bridge) ACKed message-tags
+       ;; but does not actually accept TAGMSG; remember that so outbound
+       ;; typing/reaction TAGMSGs stop rather than spamming 421s every
+       ;; keystroke.  Still display the error so the user sees it once.
+       (let ((rejected-cmd (nth 1 params)))
+         (when (string-equal (and rejected-cmd (upcase rejected-cmd)) "TAGMSG")
+           (setf (clatter-connection-tagmsg-rejected conn) t)))
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network)))
+         (when buf
+           (clatter-insert-system
+            buf (format "[%s] %s" command (string-join (cdr params) " "))))))
+      ;; Catch-all: show any unhandled numeric (e.g. 421 ERR_UNKNOWNCOMMAND,
+      ;; 411/412/432/433/461/471-477 ...) in the server buffer instead of
+      ;; silently dropping it.
+      (_
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network)))
+         (when buf
+           (clatter-insert-system
+            buf (format "[%s] %s" command (string-join (cdr params) " "))))))))
   ) ;; end of pcase / cl-block clatter-ui--on-numeric
 
 ;; --- Channel preview on hover (eldoc) ---

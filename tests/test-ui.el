@@ -590,13 +590,46 @@ always showing fool messages."
             (should-not (overlay-get ov 'after-string))))
       (clatter-test-cleanup))))
 
-(ert-deftest clatter-test-timestamp-inline-skips-system ()
-  "Inline timestamps omit system lines (CTCP, joins, history chrome)."
+(ert-deftest clatter-test-timestamp-inline-stamps-system ()
+  "Inline stamps the same lines margin modes stamp, system included."
   (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-only-if-changed nil)
         (clatter-timestamp-format "%H:%M"))
     (with-temp-buffer
       (clatter-insert-system (current-buffer) "CTCP VERSION reply from knighthk")
-      (should (= 0 (clatter-test--timestamp-overlay-count))))))
+      (should (= 1 (clatter-test--timestamp-overlay-count))))))
+
+(ert-deftest clatter-test-timestamp-inline-drops-stamp-on-compact-growth ()
+  "A compact append re-checks the stamp's fit; overflow drops it."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-only-if-changed nil)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-compact-system-messages 'compact)
+        (clatter-compact-system-group-window 180)
+        (times '(100.0 110.0 120.0))
+        (long-nick (make-string (+ (frame-width) 20) ?x)))
+    (clatter-test-with-ui-connection conn
+      (ignore conn)
+      (let ((buffer (clatter-get-or-create-buffer "testnet" "#test")))
+        (cl-letf (((symbol-function 'clatter--compact-system-now)
+                   (lambda () (pop times))))
+          (clatter--insert-system-event
+           buffer 'join '(:nick "alice" :channel "#test") nil)
+          (with-current-buffer buffer
+            (should (overlay-get (clatter-test--timestamp-overlay)
+                                 'before-string)))
+          ;; A short append still fits: the stamp survives.
+          (clatter--insert-system-event
+           buffer 'join '(:nick "bob" :channel "#test") nil)
+          (with-current-buffer buffer
+            (should (overlay-get (clatter-test--timestamp-overlay)
+                                 'before-string)))
+          ;; Growing past the body width drops it, like a long message.
+          (clatter--insert-system-event
+           buffer 'join (list :nick long-nick :channel "#test") nil)
+          (with-current-buffer buffer
+            (should-not (overlay-get (clatter-test--timestamp-overlay)
+                                     'before-string))))))))
 
 (defun clatter-test--divider-positions ()
   "Return buffer positions of minute-divider lines."
