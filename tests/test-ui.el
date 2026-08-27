@@ -644,8 +644,8 @@ always showing fool messages."
       (should (= left-margin-width 0))
       (should (= right-margin-width 0)))))
 
-(ert-deftest clatter-test-timestamp-divider-spoken-only-and-coalesced ()
-  "Minute rows fire once per spoken minute and never for system lines."
+(ert-deftest clatter-test-timestamp-divider-coalesced ()
+  "Minute rows fire once per bucket, never twice in the same bucket."
   (let ((clatter-timestamp-side 'divider)
         (clatter-timestamp-format "%H:%M")
         (clatter-timestamp-only-if-changed nil)
@@ -657,7 +657,6 @@ always showing fool messages."
         (with-temp-buffer
           (clatter-insert-privmsg (current-buffer) "alice" "hi" conn t1)
           (clatter-insert-privmsg (current-buffer) "alice" "again" conn t1b)
-          (clatter-insert-system (current-buffer) "noise")
           (clatter-insert-privmsg (current-buffer) "bob" "yo" conn t2)
           (should (= 2 (length (clatter-test--divider-positions))))
           (should (string-match-p "— 10:12 —" (buffer-string)))
@@ -667,14 +666,34 @@ always showing fool messages."
                             (1+ (line-number-at-pos (nth 0 pos)))))))
       (clatter-test-cleanup))))
 
-(ert-deftest clatter-test-timestamp-divider-skips-silence ()
-  "System traffic alone never inserts a minute row."
+(ert-deftest clatter-test-timestamp-divider-rows-for-system-lines ()
+  "System lines open rows like any stamped line, coalesced per bucket."
   (let ((clatter-timestamp-side 'divider)
-        (clatter-timestamp-format "%H:%M"))
+        (clatter-timestamp-format "%H:%M")
+        (t1 (encode-time 0 12 10 1 1 2026))
+        (t2 (encode-time 10 12 10 1 1 2026)))
     (with-temp-buffer
-      (clatter-insert-system (current-buffer) "join")
-      (clatter-insert-system (current-buffer) "part")
-      (should-not (clatter-test--divider-positions)))))
+      (clatter--insert-message (current-buffer) "*** alice joined" nil nil t1 nil)
+      (clatter--insert-message (current-buffer) "*** bob parted" nil nil t2 nil)
+      (should (= 1 (length (clatter-test--divider-positions))))
+      (should (string-match-p "— 10:12 —" (buffer-string))))))
+
+(ert-deftest clatter-test-timestamp-divider-row-follows-opener-visibility ()
+  "A row inherits its opening line's invisible categories."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M")
+        (t1 (encode-time 0 12 10 1 1 2026)))
+    (with-temp-buffer
+      (clatter--insert-message (current-buffer) "*** alice joined" nil nil t1 'join)
+      (let ((row (text-property-any (point-min) (point-max)
+                                    'clatter-timestamp-divider t)))
+        (should row)
+        (should (eq 'join (get-text-property row 'invisible)))
+        ;; Hidden with its opener under the default spec; shown once the
+        ;; category is taken out.
+        (should (invisible-p row))
+        (let ((buffer-invisibility-spec '(other)))
+          (should-not (invisible-p row)))))))
 
 (ert-deftest clatter-test-timestamp-divider-respects-interval ()
   "Divider rows fire once per interval-sized clock bucket."

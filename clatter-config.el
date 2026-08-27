@@ -198,9 +198,9 @@ can notify you without disrupting the current window.  `buffer' uses
   "Where message timestamps are displayed.
 `left' and `right' use a window margin.  `inline' right-aligns an overlay
 at the end of the message line with no reserved margin.  `divider'
-inserts a minute row before spoken messages (PRIVMSG/action) when the
-formatted time changes; system lines never create a row, and two rows
-are never adjacent.  A new buffer opens with a divider at its creation
+inserts a minute row before any line a margin would stamp when the
+clock bucket changes; the row hides and shows with the line that
+opened it, and two rows are never adjacent.  A new buffer opens with a divider at its creation
 time, so a quiet buffer still shows when it started.  nil disables
 timestamps."
   :type '(choice (const :tag "Left margin" left)
@@ -212,7 +212,7 @@ timestamps."
 
 (defcustom clatter-timestamp-divider-interval 1
   "Minutes between `divider' timestamp rows.
-A spoken message opens a new row only when this many minutes have
+A message opens a new row only when this many minutes have
 ticked on the clock since the last row in that buffer.  Values below
 1 are treated as 1.  Unused unless `clatter-timestamp-side' is `divider'."
   :type 'integer

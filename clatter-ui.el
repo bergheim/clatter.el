@@ -650,11 +650,6 @@ column is too narrow to wrap past the nick indent."
   "Return non-nil when timestamps use a per-message overlay."
   (memq clatter-timestamp-side '(left right inline)))
 
-(defun clatter--timestamp-spoken-p (msg-props invisible)
-  "Return non-nil when this insert is a visible PRIVMSG or action."
-  (and (not invisible)
-       (memq (plist-get msg-props 'clatter-msg-type) '(privmsg action))))
-
 ;; `:align-to' runs before word-wrap, so leftover space on the last
 ;; visual row can't be used.  Decided at insert time — stale after a
 ;; window resize until the line is rewritten.
@@ -710,11 +705,6 @@ rule as at insert time."
           (clatter--timestamp-overlay-apply
            ov ts-str (overlay-get ov 'clatter-timestamp-tooltip)))))))
 
-(defun clatter--timestamp-divider-spoken-p (msg-props invisible)
-  "Return non-nil when this insert can own a minute-divider row."
-  (and (eq clatter-timestamp-side 'divider)
-       (clatter--timestamp-spoken-p msg-props invisible)))
-
 (defun clatter--timestamp-divider-key (time)
   "Return the divider bucket key for TIME.
 Minutes are floored to `clatter-timestamp-divider-interval' so a value
@@ -726,16 +716,20 @@ of 10 yields one row per ten-minute clock mark."
           (* interval (/ (decoded-time-minute dec) interval)))
     (format-time-string clatter-timestamp-format (encode-time dec))))
 
-(defun clatter--timestamp-divider-insert-row (formatted tooltip line-props)
+(defun clatter--timestamp-divider-insert-row (formatted tooltip line-props
+                                                        &optional invisible)
   "Insert a minute-divider row for FORMATTED time at point.
-TOOLTIP becomes the row's help-echo; LINE-PROPS cover the whole row."
+TOOLTIP becomes the row's help-echo; LINE-PROPS cover the whole row.
+INVISIBLE carries the opening line's categories, so the row hides and
+shows with the line that opened it, like a margin stamp would."
   (let ((start (point)))
     (insert (propertize (format "— %s —" formatted)
                         'face 'clatter-timestamp
                         'clatter-timestamp-divider t
                         'help-echo tooltip)
             "\n")
-    (add-text-properties start (point) line-props)))
+    (add-text-properties start (point) line-props)
+    (put-text-property start (point) 'invisible invisible)))
 
 (defun clatter--timestamp-divider-seed (buffer)
   "Insert an opening minute-divider row in BUFFER at the current time.
@@ -788,15 +782,11 @@ append at the bottom like a traditional IRC client."
             (let* ((formatted-timestamp
                     (unless no-timestamp
                       (format-time-string clatter-timestamp-format time)))
-                   (spoken-div-p
-                    (clatter--timestamp-divider-spoken-p msg-props invisible))
                    ;; Key on the formatted value so formats without seconds
-                   ;; coalesce.  Divider mode keys only spoken lines, so
-                   ;; joins/parts cannot open a minute row.
+                   ;; coalesce.
                    (ts-key (and formatted-timestamp
                                 (if (eq clatter-timestamp-side 'divider)
-                                    (and spoken-div-p
-                                         (clatter--timestamp-divider-key time))
+                                    (clatter--timestamp-divider-key time)
                                   formatted-timestamp)))
                    (ts-changed-p
                     (not (equal ts-key clatter--last-timestamp-key)))
@@ -818,9 +808,10 @@ append at the bottom like a traditional IRC client."
                    start)
               (when ts-key
                 (setq clatter--last-timestamp-key ts-key))
-              (when (and spoken-div-p ts-key ts-changed-p)
+              (when (and (eq clatter-timestamp-side 'divider)
+                         ts-key ts-changed-p)
                 (clatter--timestamp-divider-insert-row
-                 formatted-timestamp ts-tooltip-str line-props))
+                 formatted-timestamp ts-tooltip-str line-props invisible))
               (setq start (point))
               (insert text "\n")
               (when message-line-spacing
