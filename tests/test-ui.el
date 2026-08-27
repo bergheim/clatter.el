@@ -1648,9 +1648,9 @@ Both message orders keep the page's own messages in display order."
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
 
-(ert-deftest clatter-test-history-bar-stretches-to-window ()
+(ert-deftest clatter-test-divider-stretches-to-window ()
   "The bar centers its label and fills the window via display specs."
-  (let ((bar (clatter--history-bar "history")))
+  (let ((bar (clatter--divider "history")))
     (should (string-match-p "history" bar))
     (should (equal '(space :align-to right)
                    (get-text-property (1- (length bar)) 'display bar)))

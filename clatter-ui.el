@@ -38,9 +38,9 @@
   "Face for message timestamps."
   :group 'clatter)
 
-(defface clatter-history-divider
+(defface clatter-divider
   '((t :inherit shadow))
-  "Face for history divider rows."
+  "Face for divider rows."
   :group 'clatter)
 
 (defface clatter-nick
@@ -2693,17 +2693,17 @@ otherwise (the process filter may run in any buffer, so don't rely on
                 (add-text-properties found (1+ found)
                                      (list 'clatter-reactions new-reactions))))))))))
 
-(defun clatter--history-bar (label)
+(defun clatter--divider (label)
   "Return a window-wide divider line with LABEL centered.
 The rule segments are stretch glyphs drawn with `:strike-through', so
 redisplay recenters and resizes the bar with each window - same
 mechanism as `clatter-read-marker-line', no overlays or size hooks."
-  (let ((rule '(:inherit clatter-history-divider :strike-through t))
+  (let ((rule '(:inherit clatter-divider :strike-through t))
         (label (concat " " label " ")))
     (concat
      (propertize " " 'face rule
                  'display `(space :align-to (- center ,(/ (string-width label) 2))))
-     (propertize label 'face 'clatter-history-divider)
+     (propertize label 'face 'clatter-divider)
      (propertize " " 'face rule 'display '(space :align-to right)))))
 
 (defun clatter-ui--on-batch-complete (conn _batch-type target messages)
@@ -2726,8 +2726,8 @@ on screen, so it renders at the buffer's oldest end, in the direction
              ;; end separator, then messages newest-first, then the start
              ;; separator.
              (messages (if backlog (reverse messages) messages))
-             (sep-text (clatter--history-bar "history"))
-             (end-sep-text (clatter--history-bar
+             (sep-text (clatter--divider "history"))
+             (end-sep-text (clatter--divider
                             (format "end of history (%d messages)" count))))
         (clatter--insert-message buf (if backlog end-sep-text sep-text) t)
         ;; Insert each message with dimmed style.  Suppress inline image
