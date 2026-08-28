@@ -1657,6 +1657,17 @@ Both message orders keep the page's own messages in display order."
     (should (pcase (get-text-property 0 'display bar)
               (`(space :align-to (- center ,(pred integerp))) t)))))
 
+(ert-deftest clatter-test-motd-uses-window-dividers ()
+  "MOTD boundaries use window-wide dividers."
+  (clatter-test-with-ui-connection conn
+    (let (labels)
+      (cl-letf (((symbol-function 'clatter--divider)
+                 (lambda (label)
+                   (push label labels)
+                   label)))
+        (clatter-ui--on-motd conn '("Welcome")))
+      (should (equal (nreverse labels) '("MOTD" "End of MOTD"))))))
+
 ;; --- Typing indicators ---
 
 (ert-deftest clatter-test-typing-location-default-keeps-mode-line-layout ()

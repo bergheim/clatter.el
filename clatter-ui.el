@@ -2545,10 +2545,10 @@ server buffer otherwise (e.g. the connect-time MOTD)."
                   (clatter-get-server-buffer network)
                   (clatter-get-or-create-buffer network "*server*" 'server))))
     (clatter-ui-setup-buffer-if-needed buf)
-    (clatter-insert-system buf "--- MOTD ---")
+    (clatter--insert-message buf (clatter--divider "MOTD") t)
     (dolist (line lines)
       (clatter-insert-system buf (clatter-hl-urls-in-string (clatter-format-parse line)) nil))
-    (clatter-insert-system buf "--- End of MOTD ---")))
+    (clatter--insert-message buf (clatter--divider "End of MOTD") t)))
 
 (defun clatter-ui--on-whois (conn nick data)
   "Handle WHOIS reply for UI: display NICK info from DATA.
