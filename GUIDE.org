@@ -657,38 +657,39 @@ legitimate second client.
 
 ** Display
 
-| Variable                       | Default        | Description                                                |
-|--------------------------------+----------------+------------------------------------------------------------|
-| =clatter-message-order=          | ='newest-first= | Input at top with messages below, or =oldest-first=          |
-| =clatter-timestamp-format=       | ="%H:%M"=        | Timestamp format string                                    |
-| =clatter-timestamp-side=         | ='right=        | Margin for timestamps: =left=, =right=, or =nil= to disable      |
-| =clatter-timestamp-only-if-changed= | =nil=       | Show a timestamp only when it differs from the previous    |
-| =clatter-fill-column=            | =80=             | Wrap column; =auto= derives it from the window, =nil= disables |
-| =clatter-sender-format=          | ="<%nick>"=      | Sender prefix; =%nick= is the nickname                       |
-| =clatter-nick-column-width=      | =20=             | Width of the right-aligned nick column                     |
-| =clatter-nick-column-truncate=   | =nil=            | When =t=, clip nicks longer than the column to =<nick…>=  |
-| =clatter-buffer-max-lines=       | =10000=          | Truncate a buffer past this many lines                     |
-| =clatter-buffer-name-style=      | ='full=         | =full=, =network= or =channel= buffer naming                     |
-| =clatter-header-line-preset=     | =nil=            | =topic= or =context= moves channel info to the header line     |
-| =clatter-prompt-format=          | ="%t> "=         | =%t= target, =%n= nick, =%N= network; or a function              |
-| =clatter-prompt-alignment=       | =nil=            | =right= aligns the prompt with the nick column               |
-| =clatter-away-indicator=         | ="@"=            | Marker appended to your nick while away                    |
-| =clatter-bot-label=              | ="[bot]"=        | Label on messages from nicks with bot mode                 |
-| =clatter-display-on-join=        | =t=              | Show the channel buffer when you join                      |
-| =clatter-display-on-welcome=     | =t=              | Show the server buffer after the welcome numeric           |
-| =clatter-receive-query-display=  | ='bury=         | Incoming DM buffers: =bury=, =buffer= or =pop=                   |
+| Variable                             | Default         | Description                                                      |
+|--------------------------------------+-----------------+------------------------------------------------------------------|
+| =clatter-message-order=              | ='newest-first= | Input at top with messages below, or =oldest-first=              |
+| =clatter-timestamp-format=           | ="%H:%M"=       | Timestamp format string                                          |
+| =clatter-timestamp-side=             | ='right=        | =left=/=right= margin, =inline= overlay, =divider= row, or =nil= |
+| =clatter-timestamp-interval=         | =1=             | Minutes between time marks, all sides                            |
+| =clatter-timestamp-only-if-changed=  | =nil=           | Show a timestamp only when it differs from the previous          |
+| =clatter-fill-column=                | =80=            | Wrap column; =auto= derives it from the window, =nil= disables   |
+| =clatter-sender-format=              | ="<%nick>"=     | Sender prefix; =%nick= is the nickname                           |
+| =clatter-nick-column-width=          | =20=            | Width of the right-aligned nick column                           |
+| =clatter-nick-column-truncate=       | =nil=           | When =t=, clip nicks longer than the column to =<nick…>=         |
+| =clatter-buffer-max-lines=           | =10000=         | Truncate a buffer past this many lines                           |
+| =clatter-buffer-name-style=          | ='full=         | =full=, =network= or =channel= buffer naming                     |
+| =clatter-header-line-preset=         | =nil=           | =topic= or =context= moves channel info to the header line       |
+| =clatter-prompt-format=              | ="%t> "=        | =%t= target, =%n= nick, =%N= network; or a function              |
+| =clatter-prompt-alignment=           | =nil=           | =right= aligns the prompt with the nick column                   |
+| =clatter-away-indicator=             | ="@"=           | Marker appended to your nick while away                          |
+| =clatter-bot-label=                  | ="[bot]"=       | Label on messages from nicks with bot mode                       |
+| =clatter-display-on-join=            | =t=             | Show the channel buffer when you join                            |
+| =clatter-display-on-welcome=         | =t=             | Show the server buffer after the welcome numeric                 |
+| =clatter-receive-query-display=      | ='bury=         | Incoming DM buffers: =bury=, =buffer= or =pop=                   |
 
 *** Compact system messages
 
 Presence and moderation events can be collapsed into terse glyph runs instead
 of one line each:
 
-| Variable                             | Default | Description                                           |
-|--------------------------------------+---------+-------------------------------------------------------|
-| =clatter-compact-system-messages=      | =nil=     | =nil=, =compact=, =essential=, =reasons= or =full=              |
-| =clatter-compact-system-group-window=  | =180=     | Seconds within which events group together            |
-| =clatter-compact-system-separator=     | =" · "=   | Separator between grouped events                      |
-| =clatter-compact-system-symbols=       | (glyphs) | Per-event glyphs: join =→=, part =←=, quit =×=, nick =»=, ... |
+| Variable                              | Default  | Description                                                   |
+|---------------------------------------+----------+---------------------------------------------------------------|
+| =clatter-compact-system-messages=     | =nil=    | =nil=, =compact=, =essential=, =reasons= or =full=            |
+| =clatter-compact-system-group-window= | =180=    | Seconds within which events group together                    |
+| =clatter-compact-system-separator=    | =" · "=  | Separator between grouped events                              |
+| =clatter-compact-system-symbols=      | (glyphs) | Per-event glyphs: join =→=, part =←=, quit =×=, nick =»=, ... |
 
 *** Sender prefix format
 
@@ -709,11 +710,11 @@ format supplies, so a long nick becomes =[longnic…]= or =longnic…:=.
 Consecutive PRIVMSGs from the same nick can share a single nick prefix
 instead of repeating it on every line:
 
-| Variable                        | Default | Description                                                |
-|---------------------------------+---------+------------------------------------------------------------|
-| =clatter-group-messages-by-nick=  | =nil=     | Collapse the nick column on same-nick bursts               |
-| =clatter-group-messages-window=   | =300=     | Seconds within which same-nick lines group; =nil= for adjacency only |
-| =clatter-group-messages-gap=      | =nil=     | Extra spacing between groups: pixels (integer) or line-height multiple (float) |
+| Variable                         | Default | Description                                                                    |
+|----------------------------------+---------+--------------------------------------------------------------------------------|
+| =clatter-group-messages-by-nick= | =nil=   | Collapse the nick column on same-nick bursts                                   |
+| =clatter-group-messages-window=  | =300=   | Seconds within which same-nick lines group; =nil= for adjacency only           |
+| =clatter-group-messages-gap=     | =nil=   | Extra spacing between groups: pixels (integer) or line-height multiple (float) |
 
 Only the chronologically-first message of a burst shows the nick; later
 same-nick PRIVMSGs within the window render a blank column that still
@@ -761,14 +762,14 @@ notifications, and =clatter-typing-timeout= still controls incoming expiry.
 
 ** Message Suppression and Filtering
 
-| Variable                  | Default   | Description                                                     |
-|---------------------------+-----------+-----------------------------------------------------------------|
-| =clatter-suppress-messages= | =(muted)=   | Types hidden in new buffers: join part quit nick mode away kick topic |
-| =clatter-ignore-list=       | =nil=       | Ignored nick or hostmask patterns; glob =*= and =?=                 |
-| =clatter-pals=              | =nil=       | Nicks highlighted as pals                                       |
-| =clatter-fools=             | =nil=       | Nicks dimmed and hidden                                         |
-| =clatter-fools-visible=     | =nil=       | Show fool messages dimmed instead of hidden                     |
-| =clatter-mention-p-function= | =clatter-nick-match-p= | Whole-word or substring mention matching             |
+| Variable                     | Default                | Description                                                           |
+|------------------------------+------------------------+-----------------------------------------------------------------------|
+| =clatter-suppress-messages=  | =(muted)=              | Types hidden in new buffers: join part quit nick mode away kick topic |
+| =clatter-ignore-list=        | =nil=                  | Ignored nick or hostmask patterns; glob =*= and =?=                   |
+| =clatter-pals=               | =nil=                  | Nicks highlighted as pals                                             |
+| =clatter-fools=              | =nil=                  | Nicks dimmed and hidden                                               |
+| =clatter-fools-visible=      | =nil=                  | Show fool messages dimmed instead of hidden                           |
+| =clatter-mention-p-function= | =clatter-nick-match-p= | Whole-word or substring mention matching                              |
 
 Suppression is non-destructive: matching messages are still inserted, just
 hidden, so =/unsuppress= reveals the history you missed.
@@ -779,15 +780,15 @@ hidden, so =/unsuppress= reveals the history you missed.
 
 ** Nick Highlighting
 
-| Variable                        | Default   | Description                              |
-|---------------------------------+-----------+------------------------------------------|
-| =clatter-hl-nicks-enabled=        | =t=         | Colorize nicks in message text           |
-| =clatter-hl-nicks-minimum-length= | =3=         | Shortest nick eligible for colorization  |
-| =clatter-hl-nicks-skip-nicks=     | =nil=       | Nicks never colorized                    |
+| Variable                          | Default   | Description                              |
+|-----------------------------------+-----------+------------------------------------------|
+| =clatter-hl-nicks-enabled=        | =t=       | Colorize nicks in message text           |
+| =clatter-hl-nicks-minimum-length= | =3=       | Shortest nick eligible for colorization  |
+| =clatter-hl-nicks-skip-nicks=     | =nil=     | Nicks never colorized                    |
 | =clatter-hl-nicks-skip-faces=     | (3 faces) | Faces exempt from in-text highlighting   |
-| =clatter-hl-nicks-alias-alist=    | =nil=       | Map alternate nicks to a canonical color |
+| =clatter-hl-nicks-alias-alist=    | =nil=     | Map alternate nicks to a canonical color |
 | =clatter-hl-nick-base-faces=      | 12 faces  | Palette nicks inherit from               |
-| =clatter-hl-keywords=             | =nil=       | Extra words highlighted in message text  |
+| =clatter-hl-keywords=             | =nil=     | Extra words highlighted in message text  |
 
 Nick colors are derived from the active theme rather than hardcoded: each nick
 hashes deterministically onto one of the =font-lock-*= faces in
@@ -798,20 +799,20 @@ argument to refresh faces already in use).
 
 ** Activity Tracking
 
-| Variable                       | Default        | Description                                    |
-|--------------------------------+----------------+------------------------------------------------|
-| =clatter-track-enabled=          | =t=              | Show activity in the global mode line          |
-| =clatter-track-position=         | ='after-modes=  | Placement within the mode line                 |
-| =clatter-track-muted-channels=   | =nil=            | Targets dimmed but still tracked               |
-| =clatter-track-exclude-targets=  | =nil=            | Targets hidden from every tracker surface      |
-| =clatter-track-shorten=          | =nil=            | =nil=, an integer N, =drop-vowels= or =syllable= channel shortening |
-| =clatter-track-show-counts=      | =t=              | Show unread counts                             |
-| =clatter-track-count-style=      | ='suffix=       | =suffix=, =superscript=, =subscript=, =glyph=, =none=    |
-| =clatter-track-indicators=       | =@= / =*= / (none) | Prefix glyph for mention / DM / activity       |
-| =clatter-track-faces-alist=      | (4 faces)      | Face per activity type                         |
-| =clatter-track-show-in-clatter-buffers= | =nil=       | Also show crumbs in each clatter buffer        |
-| =clatter-track-global-mode-line= | =t=          | Append crumbs to the global mode line (set =nil= with a custom modeline) |
-| =clatter-track-switch-return-to-origin= | =t=    | =clatter-track-switch= returns to the start buffer when exhausted |
+| Variable                                | Default            | Description                                                              |
+|-----------------------------------------+--------------------+--------------------------------------------------------------------------|
+| =clatter-track-enabled=                 | =t=                | Show activity in the global mode line                                    |
+| =clatter-track-position=                | ='after-modes=     | Placement within the mode line                                           |
+| =clatter-track-muted-channels=          | =nil=              | Targets dimmed but still tracked                                         |
+| =clatter-track-exclude-targets=         | =nil=              | Targets hidden from every tracker surface                                |
+| =clatter-track-shorten=                 | =nil=              | =nil=, an integer N, =drop-vowels= or =syllable= channel shortening      |
+| =clatter-track-show-counts=             | =t=                | Show unread counts                                                       |
+| =clatter-track-count-style=             | ='suffix=          | =suffix=, =superscript=, =subscript=, =glyph=, =none=                    |
+| =clatter-track-indicators=              | =@= / =*= / (none) | Prefix glyph for mention / DM / activity                                 |
+| =clatter-track-faces-alist=             | (4 faces)          | Face per activity type                                                   |
+| =clatter-track-show-in-clatter-buffers= | =nil=              | Also show crumbs in each clatter buffer                                  |
+| =clatter-track-global-mode-line=        | =t=                | Append crumbs to the global mode line (set =nil= with a custom modeline) |
+| =clatter-track-switch-return-to-origin= | =t=                | =clatter-track-switch= returns to the start buffer when exhausted        |
 
 To embed the indicator in a custom mode line (for example a
 =doom-modeline= segment), set =clatter-track-global-mode-line= to =nil= so
@@ -843,26 +844,26 @@ switching from.
 
 ** Notifications
 
-| Variable                      | Default   | Description                          |
-|-------------------------------+-----------+--------------------------------------|
-| =clatter-notify-enabled=        | =t=         | Enable desktop notifications         |
-| =clatter-notify-on-mention=     | =t=         | Notify on nick mentions              |
-| =clatter-notify-on-dm=          | =t=         | Notify on direct messages            |
-| =clatter-notify-on-invite=      | =t=         | Notify on channel invitations        |
-| =clatter-notify-on-keyword=     | =t=         | Notify on keyword matches            |
-| =clatter-notify-keywords=       | =nil=       | Extra keywords to notify on          |
-| =clatter-notify-muted-channels= | =nil=       | Channels that never notify           |
-| =clatter-notify-muted-nicks=    | =nil=       | Nick patterns that never notify      |
-| =clatter-notify-current-buffer= | =nil=       | Notify even for the visible buffer   |
-| =clatter-notify-echo-area=      | =nil=       | Echo-area fallback when native delivery fails |
-| =clatter-notify-timeout=        | =5000=      | Notification timeout (ms)            |
-| =clatter-notify-icon=           | =nil=       | Path to a notification icon          |
-| =clatter-notify-urgency=        | ='normal=  | =low=, =normal= or =critical=              |
-| =clatter-notify-sound=          | =nil=       | Sound file                           |
-| =clatter-notify-max-length=     | =80=        | Max message length in a notification |
-| =clatter-notify-cooldown=       | =3=         | Min seconds between notifications per source |
-| =clatter-notify-dm-priority=    | ='always=  | =always=, =rules= or =never=               |
-| =clatter-notify-rules=          | =nil=       | Per-target rules (see below)         |
+| Variable                        | Default   | Description                                   |
+|---------------------------------+-----------+-----------------------------------------------|
+| =clatter-notify-enabled=        | =t=       | Enable desktop notifications                  |
+| =clatter-notify-on-mention=     | =t=       | Notify on nick mentions                       |
+| =clatter-notify-on-dm=          | =t=       | Notify on direct messages                     |
+| =clatter-notify-on-invite=      | =t=       | Notify on channel invitations                 |
+| =clatter-notify-on-keyword=     | =t=       | Notify on keyword matches                     |
+| =clatter-notify-keywords=       | =nil=     | Extra keywords to notify on                   |
+| =clatter-notify-muted-channels= | =nil=     | Channels that never notify                    |
+| =clatter-notify-muted-nicks=    | =nil=     | Nick patterns that never notify               |
+| =clatter-notify-current-buffer= | =nil=     | Notify even for the visible buffer            |
+| =clatter-notify-echo-area=      | =nil=     | Echo-area fallback when native delivery fails |
+| =clatter-notify-timeout=        | =5000=    | Notification timeout (ms)                     |
+| =clatter-notify-icon=           | =nil=     | Path to a notification icon                   |
+| =clatter-notify-urgency=        | ='normal= | =low=, =normal= or =critical=                 |
+| =clatter-notify-sound=          | =nil=     | Sound file                                    |
+| =clatter-notify-max-length=     | =80=      | Max message length in a notification          |
+| =clatter-notify-cooldown=       | =3=       | Min seconds between notifications per source  |
+| =clatter-notify-dm-priority=    | ='always= | =always=, =rules= or =never=                  |
+| =clatter-notify-rules=          | =nil=     | Per-target rules (see below)                  |
 
 Delivery uses Emacs-native notifications (D-Bus, Android, Haiku or Windows),
 falling back to =terminal-notifier= on macOS. Failure is silent unless
@@ -890,8 +891,8 @@ default) means DMs notify regardless, =rules= makes them follow per-target rules
 
 ** Logging
 
-| Variable                     | Default                  | Description                  |
-|------------------------------+--------------------------+------------------------------|
+| Variable                       | Default                    | Description                  |
+|--------------------------------+----------------------------+------------------------------|
 | =clatter-log-enable=           | =nil=                      | Enable channel logging       |
 | =clatter-log-directory=        | =~/.emacs.d/clatter/logs/= | Log file directory           |
 | =clatter-log-rotate-daily=     | =t=                        | Daily log rotation           |
@@ -917,24 +918,24 @@ these files existing.
 
 ** Search
 
-| Variable                     | Default | Description                  |
-|------------------------------+---------+------------------------------|
-| =clatter-search-max-results=   | =500=     | Max search results           |
-| =clatter-search-context-lines= | =0=       | Context lines around matches |
+| Variable                       | Default | Description                  |
+|--------------------------------+---------+------------------------------|
+| =clatter-search-max-results=   | =500=   | Max search results           |
+| =clatter-search-context-lines= | =0=     | Context lines around matches |
 
 ** Chat History and Read Markers
 
-| Variable                         | Default | Description                                |
-|----------------------------------+---------+--------------------------------------------|
-| =clatter-chathistory-enabled=      | =t=       | Enable IRCv3 CHATHISTORY                   |
-| =clatter-chathistory-limit=        | =50=      | Messages fetched per request               |
-| =clatter-chathistory-on-join=      | =t=       | Fetch on channel join                      |
-| =clatter-chathistory-on-reconnect= | =t=       | Fetch the gap on reconnect                 |
-| =clatter-read-marker-enabled=      | =t=       | Sync read position with the server         |
-| =clatter-read-marker-auto-send=    | =t=       | Send MARKREAD when switching to a buffer   |
-| =clatter-read-state-enabled=       | =t=       | Local last-read fallback for bouncers      |
-| =clatter-read-state-file=          | =~/.emacs.d/clatter/read-state.el= | Where local read state lives |
-| =clatter-read-state-save-delay=    | =2=       | Debounce seconds for read-state writes     |
+| Variable                           | Default                            | Description                              |
+|------------------------------------+------------------------------------+------------------------------------------|
+| =clatter-chathistory-enabled=      | =t=                                | Enable IRCv3 CHATHISTORY                 |
+| =clatter-chathistory-limit=        | =50=                               | Messages fetched per request             |
+| =clatter-chathistory-on-join=      | =t=                                | Fetch on channel join                    |
+| =clatter-chathistory-on-reconnect= | =t=                                | Fetch the gap on reconnect               |
+| =clatter-read-marker-enabled=      | =t=                                | Sync read position with the server       |
+| =clatter-read-marker-auto-send=    | =t=                                | Send MARKREAD when switching to a buffer |
+| =clatter-read-state-enabled=       | =t=                                | Local last-read fallback for bouncers    |
+| =clatter-read-state-file=          | =~/.emacs.d/clatter/read-state.el= | Where local read state lives             |
+| =clatter-read-state-save-delay=    | =2=                                | Debounce seconds for read-state writes   |
 
 =M-x clatter-chathistory-more= fetches older messages;
 =M-x clatter-read-marker-mark= and =M-x clatter-read-marker-query= drive the
@@ -954,9 +955,9 @@ window is resized:
 
 ** Nick Completion
 
-| Variable                     | Default | Description                            |
-|------------------------------+---------+----------------------------------------|
-| =clatter-completion-add-colon= | =t=       | Append =:= after a nick at start of line |
+| Variable                       | Default | Description                              |
+|--------------------------------+---------+------------------------------------------|
+| =clatter-completion-add-colon= | =t=     | Append =:= after a nick at start of line |
 
 Completion is a standard CAPF, so it works with corfu, vertico and orderless.
 It completes nicks, =/commands= and =#channels=; annotations show channel prefix
@@ -964,27 +965,27 @@ for nicks and a description for commands.
 
 ** Nick List Sidebar
 
-| Variable               | Default  | Description                |
-|------------------------+----------+----------------------------|
-| =clatter-nicklist-width= | =20=       | Sidebar width              |
-| =clatter-nicklist-side=  | ='right=  | Which side (left or right) |
+| Variable                 | Default  | Description                |
+|--------------------------+----------+----------------------------|
+| =clatter-nicklist-width= | =20=     | Sidebar width              |
+| =clatter-nicklist-side=  | ='right= | Which side (left or right) |
 
 Toggle with =M-x clatter-nicklist-toggle=. An open list follows the selected channel.
 
 ** mIRC Formatting
 
-| Variable                  | Default | Description                       |
-|---------------------------+---------+-----------------------------------|
-| =clatter-format-enable=     | =t=       | Parse mIRC color/formatting codes |
-| =clatter-format-strip-only= | =nil=     | Strip codes without rendering     |
+| Variable                    | Default | Description                       |
+|-----------------------------+---------+-----------------------------------|
+| =clatter-format-enable=     | =t=     | Parse mIRC color/formatting codes |
+| =clatter-format-strip-only= | =nil=   | Strip codes without rendering     |
 
 ** URL Preview
 
-| Variable                             | Default    | Description                  |
-|--------------------------------------+------------+------------------------------|
-| =clatter-url-preview-enable=           | =nil=        | Fetch and display URL titles |
-| =clatter-url-preview-max-length=       | =200=        | Max title length             |
-| =clatter-url-preview-timeout=          | =10=         | Fetch timeout (seconds)      |
+| Variable                               | Default    | Description                  |
+|----------------------------------------+------------+------------------------------|
+| =clatter-url-preview-enable=           | =nil=      | Fetch and display URL titles |
+| =clatter-url-preview-max-length=       | =200=      | Max title length             |
+| =clatter-url-preview-timeout=          | =10=       | Fetch timeout (seconds)      |
 | =clatter-url-preview-exclude-patterns= | 15 regexps | Binary/media URLs to skip    |
 
 Titles are cached, so a repeated link is not re-fetched. Requires =curl=.
@@ -994,13 +995,13 @@ internal-network hosts.
 
 ** Inline Images
 
-| Variable                 | Default         | Description                  |
-|--------------------------+-----------------+------------------------------|
-| =clatter-image-enable=     | =nil=             | Enable inline image previews |
-| =clatter-image-max-width=  | =400=             | Max image width (pixels)     |
-| =clatter-image-max-height= | =300=             | Max image height (pixels)    |
-| =clatter-image-max-size=   | =5242880= (5 MB)  | Max download size            |
-| =clatter-image-extensions= | =(png jpg ...)=   | Recognized image extensions  |
+| Variable                   | Default          | Description                  |
+|----------------------------+------------------+------------------------------|
+| =clatter-image-enable=     | =nil=            | Enable inline image previews |
+| =clatter-image-max-width=  | =400=            | Max image width (pixels)     |
+| =clatter-image-max-height= | =300=            | Max image height (pixels)    |
+| =clatter-image-max-size=   | =5242880= (5 MB) | Max download size            |
+| =clatter-image-extensions= | =(png jpg ...)=  | Recognized image extensions  |
 
 GUI frames only; a no-op in a terminal. Fetching is an async =curl= subprocess
 with the same scheme and redirect restrictions as URL preview, plus a magic-byte
@@ -1008,21 +1009,21 @@ check on the downloaded data.
 
 ** Raw Protocol Log
 
-| Variable                   | Default | Description                       |
-|----------------------------+---------+-----------------------------------|
-| =clatter-rawlog-enabled=     | =nil=     | Enable rawlog buffers             |
-| =clatter-rawlog-max-lines=   | =5000=    | Max lines per rawlog buffer       |
-| =clatter-rawlog-show-parsed= | =t=       | Show the parsed message breakdown |
-| =clatter-log-raw-protocol=   | =nil=     | Log raw lines to =*clatter-debug*=  |
+| Variable                     | Default | Description                        |
+|------------------------------+---------+------------------------------------|
+| =clatter-rawlog-enabled=     | =nil=   | Enable rawlog buffers              |
+| =clatter-rawlog-max-lines=   | =5000=  | Max lines per rawlog buffer        |
+| =clatter-rawlog-show-parsed= | =t=     | Show the parsed message breakdown  |
+| =clatter-log-raw-protocol=   | =nil=   | Log raw lines to =*clatter-debug*= |
 
 ** DCC File Transfer
 
-| Variable                       | Default        | Description                               |
-|--------------------------------+----------------+-------------------------------------------|
-| =clatter-dcc-download-directory= | =~/Downloads/=   | Where received files are saved            |
-| =clatter-dcc-auto-accept=        | =nil=            | Auto-accept incoming offers               |
-| =clatter-dcc-max-file-size=      | =0=              | Max accepted size in bytes; =0= = unlimited |
-| =clatter-dcc-progress-interval=  | =2=              | Seconds between progress updates          |
+| Variable                         | Default        | Description                                 |
+|----------------------------------+----------------+---------------------------------------------|
+| =clatter-dcc-download-directory= | =~/Downloads/= | Where received files are saved              |
+| =clatter-dcc-auto-accept=        | =nil=          | Auto-accept incoming offers                 |
+| =clatter-dcc-max-file-size=      | =0=            | Max accepted size in bytes; =0= = unlimited |
+| =clatter-dcc-progress-interval=  | =2=            | Seconds between progress updates            |
 
 These live in their own customize group, =clatter-dcc=.
 
@@ -1041,40 +1042,40 @@ The *Enabled by* column distinguishes three cases - loaded and always active,
 loaded but gated by an option that =clatter-setup= consults, and needing an
 explicit call from your configuration.
 
-| Module                   | What it does                                  | Enabled by                          |
-|--------------------------+-----------------------------------------------+-------------------------------------|
-| =clatter.el=               | Entry points, autoloads, =clatter-setup=        | always                              |
-| =clatter-config.el=        | User options, auth-source lookup              | always                              |
-| =clatter-protocol.el=      | IRC message parsing and formatting            | always                              |
-| =clatter-connection.el=    | TCP/TLS, reconnect, health pings              | always                              |
-| =clatter-socks.el=         | SOCKS5 / Tor proxy                            | =:proxy= / =:tor= per network           |
-| =clatter-cap.el=           | CAP negotiation and SASL                      | always                              |
-| =clatter-sasl-scram.el=    | SASL SCRAM-SHA-256 (RFC 5802)                 | =:sasl scram-sha-256=                 |
-| =clatter-sts.el=           | IRCv3 Strict Transport Security               | =clatter-sts-enable= (on)             |
-| =clatter-handlers.el=      | Message dispatch and hooks                    | always                              |
-| =clatter-model.el=         | Buffer registry, channel and nick state       | always                              |
-| =clatter-ui.el=            | Rendering, faces, mode line, input            | always                              |
-| =clatter-commands.el=      | Slash commands                                | always                              |
-| =clatter-completion.el=    | Completion at point                           | always                              |
-| =clatter-actions.el=       | Message action menu                           | always                              |
-| =clatter-hl-nicks.el=      | Nick colorization, keywords, URL links        | =clatter-hl-nicks-enabled= (on)       |
-| =clatter-format.el=        | mIRC color and formatting codes               | =clatter-format-enable= (on)          |
-| =clatter-smart.el=         | Adaptive noise filtering                      | =clatter-smart-enabled= (on)          |
-| =clatter-pals.el=          | Pals, fools and visibility                    | =clatter-pals= / =clatter-fools=        |
-| =clatter-nicklist.el=      | Channel member sidebar                        | =clatter-nicklist-toggle=             |
-| =clatter-list.el=          | Channel list browser                          | =/list=                               |
-| =clatter-track.el=         | Mode-line activity tracking                   | =clatter-track-enabled= (on)          |
-| =clatter-notify.el=        | Desktop notifications                         | =clatter-notify-enabled= (on)         |
-| =clatter-chathistory.el=   | IRCv3 CHATHISTORY backlog                     | =clatter-chathistory-enabled= (on)    |
-| =clatter-read-marker.el=   | IRCv3 read markers                            | =clatter-read-marker-enabled= (on)    |
-| =clatter-soju.el=          | soju bouncer network fan-out                  | =clatter-soju-enabled= (on) + =:bouncer= |
-| =clatter-log.el=           | Channel logging with daily rotation           | =clatter-log-enable= (off)            |
-| =clatter-url-preview.el=   | Async URL title preview                       | =clatter-url-preview-enable= (off)    |
-| =clatter-rawlog.el=        | Raw protocol inspector                        | =clatter-rawlog-enabled= (off)        |
-| =clatter-search.el=        | Full-text search across logs                  | =/search= (loaded on demand)          |
-| =clatter-image.el=         | Inline image preview (GUI only)               | =(require 'clatter-image)= + =clatter-image-enable= |
-| =clatter-dcc.el=           | DCC file transfer                             | =(clatter-dcc-setup)=                 |
-| =clatter-org.el=           | Org links, capture, log export                | =(clatter-org-setup)=                 |
+| Module                   | What it does                             | Enabled by                                          |
+|--------------------------+------------------------------------------+-----------------------------------------------------|
+| =clatter.el=             | Entry points, autoloads, =clatter-setup= | always                                              |
+| =clatter-config.el=      | User options, auth-source lookup         | always                                              |
+| =clatter-protocol.el=    | IRC message parsing and formatting       | always                                              |
+| =clatter-connection.el=  | TCP/TLS, reconnect, health pings         | always                                              |
+| =clatter-socks.el=       | SOCKS5 / Tor proxy                       | =:proxy= / =:tor= per network                       |
+| =clatter-cap.el=         | CAP negotiation and SASL                 | always                                              |
+| =clatter-sasl-scram.el=  | SASL SCRAM-SHA-256 (RFC 5802)            | =:sasl scram-sha-256=                               |
+| =clatter-sts.el=         | IRCv3 Strict Transport Security          | =clatter-sts-enable= (on)                           |
+| =clatter-handlers.el=    | Message dispatch and hooks               | always                                              |
+| =clatter-model.el=       | Buffer registry, channel and nick state  | always                                              |
+| =clatter-ui.el=          | Rendering, faces, mode line, input       | always                                              |
+| =clatter-commands.el=    | Slash commands                           | always                                              |
+| =clatter-completion.el=  | Completion at point                      | always                                              |
+| =clatter-actions.el=     | Message action menu                      | always                                              |
+| =clatter-hl-nicks.el=    | Nick colorization, keywords, URL links   | =clatter-hl-nicks-enabled= (on)                     |
+| =clatter-format.el=      | mIRC color and formatting codes          | =clatter-format-enable= (on)                        |
+| =clatter-smart.el=       | Adaptive noise filtering                 | =clatter-smart-enabled= (on)                        |
+| =clatter-pals.el=        | Pals, fools and visibility               | =clatter-pals= / =clatter-fools=                    |
+| =clatter-nicklist.el=    | Channel member sidebar                   | =clatter-nicklist-toggle=                           |
+| =clatter-list.el=        | Channel list browser                     | =/list=                                             |
+| =clatter-track.el=       | Mode-line activity tracking              | =clatter-track-enabled= (on)                        |
+| =clatter-notify.el=      | Desktop notifications                    | =clatter-notify-enabled= (on)                       |
+| =clatter-chathistory.el= | IRCv3 CHATHISTORY backlog                | =clatter-chathistory-enabled= (on)                  |
+| =clatter-read-marker.el= | IRCv3 read markers                       | =clatter-read-marker-enabled= (on)                  |
+| =clatter-soju.el=        | soju bouncer network fan-out             | =clatter-soju-enabled= (on) + =:bouncer=            |
+| =clatter-log.el=         | Channel logging with daily rotation      | =clatter-log-enable= (off)                          |
+| =clatter-url-preview.el= | Async URL title preview                  | =clatter-url-preview-enable= (off)                  |
+| =clatter-rawlog.el=      | Raw protocol inspector                   | =clatter-rawlog-enabled= (off)                      |
+| =clatter-search.el=      | Full-text search across logs             | =/search= (loaded on demand)                        |
+| =clatter-image.el=       | Inline image preview (GUI only)          | =(require 'clatter-image)= + =clatter-image-enable= |
+| =clatter-dcc.el=         | DCC file transfer                        | =(clatter-dcc-setup)=                               |
+| =clatter-org.el=         | Org links, capture, log export           | =(clatter-org-setup)=                               |
 
 The on-by-default extras can also be toggled at runtime with their
 =clatter-FEATURE-enable= / =clatter-FEATURE-disable= commands.
