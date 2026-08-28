@@ -659,6 +659,24 @@ always showing fool messages."
             (should (equal (overlay-get ov 'help-echo) "10:12:00"))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-timestamp-margin-clears-inline-after-string ()
+  "Reapplying a margin stamp drops a leftover inline after-string."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (conn (clatter-test-make-connection))
+        (time (encode-time 0 12 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "hello" conn time)
+          (let ((ov (clatter-test--timestamp-overlay)))
+            (should (overlay-get ov 'after-string))
+            (let ((clatter-timestamp-side 'right))
+              (clatter--timestamp-overlay-apply ov "10:12")
+              (should-not (overlay-get ov 'after-string))
+              (should (overlay-get ov 'before-string)))))
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-timestamp-inline-stays-before-newline ()
   "Inline stamp overlay ends at the newline, not on the next message."
   (let ((clatter-timestamp-side 'inline)

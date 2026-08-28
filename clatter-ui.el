@@ -751,6 +751,7 @@ TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
                                  stamp))))
       ;; Apply 'default face after 'clatter-timestamp so no unwanted face
       ;; properties are inherited from text which might be at point.
+      (overlay-put ov 'after-string nil)
       (overlay-put ov 'before-string
                    (propertize " " 'display
                                `((margin ,(if (eq clatter-timestamp-side 'left)
