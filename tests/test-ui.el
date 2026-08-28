@@ -1885,13 +1885,19 @@ Both message orders keep the page's own messages in display order."
           (kill-buffer buf))))))
 
 (ert-deftest clatter-test-divider-stretches-to-window ()
-  "The bar centers its label and extends its rule to the window edge."
+  "The bar centers its label and keeps both rules through message filling."
   (let ((bar (clatter--divider "history")))
     (should (string-match-p "history" bar))
-    (should (eq t (plist-get (get-text-property (1- (length bar)) 'face bar)
-                             :extend)))
     (should (pcase (get-text-property 0 'display bar)
-              (`(space :align-to (- center ,(pred integerp))) t)))))
+              (`(space :align-to (- center ,(pred integerp))) t)))
+    (let ((clatter-fill-column 80)
+          (clatter-nick-column-width 7))
+      (with-temp-buffer
+        (clatter--insert-message (current-buffer) bar t)
+        (goto-char (point-min))
+        (end-of-line)
+        (should (equal '(space :align-to right)
+                       (get-text-property (1- (point)) 'display)))))))
 
 (ert-deftest clatter-test-motd-uses-window-dividers ()
   "MOTD boundaries use window-wide dividers."
