@@ -1020,9 +1020,12 @@ Returns ((sender . text) . msg-type) or nil."
 Bound around history/batch playback so a reconnect backlog does not scan
 and fetch images for hundreds of old messages at once.")
 
-(defun clatter-insert-generic (msg-type buffer sender text conn &optional server-time invisible)
+(defun clatter-insert-generic (msg-type buffer sender text conn &optional server-time invisible extra-props)
   "Insert a MSG-TYPE from SENDER with TEXT into BUFFER using CONN context.
-SERVER-TIME overrides the current time for the timestamp."
+SERVER-TIME overrides the current time for the timestamp.  EXTRA-PROPS is
+an optional plist appended to the text properties otherwise passed to
+`clatter--insert-message' (used by `clatter-feed' to stash the source
+network/target for jump-back)."
   (let* ((nick-face (clatter-hl-nick-face sender conn))
          (my-nick (clatter-connection-nick conn))
          (is-reply-to-me (get-text-property 0 'clatter-reply-to-me text))
@@ -1124,6 +1127,8 @@ SERVER-TIME overrides the current time for the timestamp."
       (setq props (plist-put props 'clatter-msgid msgid)))
     (when self-echo-nonce
       (setq props (plist-put props 'clatter-self-echo-nonce self-echo-nonce)))
+    (when extra-props
+      (setq props (append props extra-props)))
     (when (and group-gap-p (not insert-before-previous-p))
       (with-current-buffer buffer
         ;; The gap goes on the previous *visible* message's newline: with
