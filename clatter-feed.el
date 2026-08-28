@@ -1,4 +1,4 @@
-;;; clatter-unified.el --- Unified inbox buffer for clatter -*- lexical-binding: t; -*-
+;;; clatter-feed.el --- Feed inbox buffer for clatter -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026 Glenn Thompson
 ;; Author: Glenn Thompson <glenn@paren.works>
@@ -6,22 +6,22 @@
 
 ;;; Commentary:
 ;; Collects live messages from every channel and query, across all
-;; networks, into a single `*clatter-unified*' buffer.  Lines are rendered
+;; networks, into a single `*clatter-feed*' buffer.  Lines are rendered
 ;; by `clatter-insert-generic', the same entry point the per-buffer UI
 ;; uses, so sender colors, mentions, grouping and filtering behave as they
 ;; do in a channel.  (Nicks inside message text are not highlighted: that
 ;; keys off a channel's member list, which this buffer has none of.)
-;; Enable with `clatter-unified-enabled'; RET on a message jumps to it in
-;; its source buffer.  `clatter-unified-hide-visible' and
-;; `clatter-unified-hide-channels' collapse sources the same way fools
+;; Enable with `clatter-feed-enabled'; RET on a message jumps to it in
+;; its source buffer.  `clatter-feed-hide-visible' and
+;; `clatter-feed-hide-channels' collapse sources the same way fools
 ;; do: text stays, the spec hides it.
 
 ;;; Code:
 
 ;; Defined below with their `:set' machinery; declared here for the
 ;; functions that machinery calls.
-(defvar clatter-unified-hide-visible)
-(defvar clatter-unified-hide-channels)
+(defvar clatter-feed-hide-visible)
+(defvar clatter-feed-hide-channels)
 
 (require 'clatter-config)
 (require 'clatter-protocol)
@@ -32,42 +32,48 @@
 (require 'clatter-pals)
 (require 'clatter-ui)
 
-(defcustom clatter-unified-enabled nil
+(defcustom clatter-feed-enabled nil
   "Collect messages from every channel and query into one inbox buffer."
   :type 'boolean
   :group 'clatter)
 
-(defcustom clatter-unified-autoscroll t
+(defcustom clatter-feed-autoscroll t
   "When non-nil, follow new messages while at the bottom of the inbox.
-Windows (and the buffer's point) sitting at the end of the unified
+Windows (and the buffer's point) sitting at the end of the feed
 buffer advance with each new message; anywhere else they stay put, so
 scrolling back to read is never interrupted."
   :type 'boolean
   :group 'clatter)
 
-(defconst clatter-unified--buffer-name "*clatter-unified*"
-  "Name of the unified inbox buffer.")
+(defconst clatter-feed--buffer-name "*clatter-feed*"
+  "Name of the feed inbox buffer.")
 
-(defvar-local clatter-unified--last-source nil
+(defvar-local clatter-feed--last-source nil
   "Source (NETWORK . TARGET) of the previously captured message.
 Used to decide when to insert a channel separator line.")
 
-(defvar-local clatter-unified--hidden-atoms nil
+(defvar-local clatter-feed--hidden-atoms nil
   "Hide atoms currently present in this buffer's invisibility spec.")
 
-(defun clatter-unified--hide-atom (network target)
-  "Return the invisibility atom for NETWORK and TARGET."
-  (intern (format "clatter-unified-hide:%s/%s"
-                  network (downcase target))))
+(defvar clatter-feed--hide-atom-cache
+  (make-hash-table :test #'equal :weakness 'value)
+  "Weak cache of source keys to uninterned invisibility symbols.")
 
-(defun clatter-unified--combine-invisible (base atom)
+(defun clatter-feed--hide-atom (network target)
+  "Return the invisibility atom for NETWORK and TARGET."
+  (let ((key (format "%s/%s" network (downcase target))))
+    (or (gethash key clatter-feed--hide-atom-cache)
+        (puthash key (make-symbol (concat "clatter-feed-hide:" key))
+                 clatter-feed--hide-atom-cache))))
+
+(defun clatter-feed--combine-invisible (base atom)
   "Return a flat invisibility value combining BASE with hide ATOM."
   (cond
    ((null base) atom)
    ((listp base) (append base (list atom)))
    (t (list base atom))))
 
-(defun clatter-unified--visible-hide-atoms ()
+(defun clatter-feed--visible-hide-atoms ()
   "Return hide atoms for channel and query buffers shown in any window."
   (let (atoms)
     (walk-windows
@@ -79,126 +85,126 @@ Used to decide when to insert a channel separator line.")
                         (memq clatter--buffer-type '(channel query))
                         clatter--network
                         clatter--target)
-               (push (clatter-unified--hide-atom clatter--network
-                                                 clatter--target)
+               (push (clatter-feed--hide-atom clatter--network
+                                               clatter--target)
                      atoms))))))
      nil t)
     (delete-dups atoms)))
 
-(defun clatter-unified--target-listed-p (target patterns)
+(defun clatter-feed--target-listed-p (target patterns)
   "Return non-nil if TARGET matches a string in PATTERNS, ignoring case."
   (seq-some (lambda (pat)
               (and (stringp pat)
                    (string-equal-ignore-case pat target)))
             patterns))
 
-(defun clatter-unified--listed-hide-atoms (patterns)
+(defun clatter-feed--listed-hide-atoms (patterns)
   "Return hide atoms for PATTERNS across connections, buffers, and the inbox."
   (let (atoms)
     (maphash
      (lambda (network _conn)
        (dolist (pat patterns)
          (when (stringp pat)
-           (push (clatter-unified--hide-atom network pat) atoms))))
+           (push (clatter-feed--hide-atom network pat) atoms))))
      clatter-connections)
     (dolist (buf (clatter-all-buffers))
       (with-current-buffer buf
         (when (and clatter--network clatter--target
                    (memq clatter--buffer-type '(channel query))
-                   (clatter-unified--target-listed-p clatter--target patterns))
-          (push (clatter-unified--hide-atom clatter--network clatter--target)
+                   (clatter-feed--target-listed-p clatter--target patterns))
+          (push (clatter-feed--hide-atom clatter--network clatter--target)
                 atoms))))
-    (when-let* ((inbox (get-buffer clatter-unified--buffer-name))
+    (when-let* ((inbox (get-buffer clatter-feed--buffer-name))
                 ((buffer-live-p inbox)))
       (with-current-buffer inbox
         (let ((pos (point-min)))
           (while (< pos (point-max))
-            (let ((network (get-text-property pos 'clatter-unified-network))
-                  (target (get-text-property pos 'clatter-unified-target)))
+            (let ((network (get-text-property pos 'clatter-feed-network))
+                  (target (get-text-property pos 'clatter-feed-target)))
               (when (and network target
-                         (clatter-unified--target-listed-p target patterns))
-                (push (clatter-unified--hide-atom network target) atoms)))
+                         (clatter-feed--target-listed-p target patterns))
+                (push (clatter-feed--hide-atom network target) atoms)))
             (setq pos (or (next-single-property-change
-                           pos 'clatter-unified-target nil (point-max))
+                           pos 'clatter-feed-target nil (point-max))
                           (point-max)))))))
     (delete-dups atoms)))
 
-(defun clatter-unified--desired-hide-atoms ()
+(defun clatter-feed--desired-hide-atoms ()
   "Return hide atoms for the current visible and channel-list options."
   (delete-dups
-   (append (and clatter-unified-hide-visible
-                (clatter-unified--visible-hide-atoms))
-           (and clatter-unified-hide-channels
-                (clatter-unified--listed-hide-atoms
-                 clatter-unified-hide-channels)))))
+   (append (and clatter-feed-hide-visible
+                (clatter-feed--visible-hide-atoms))
+           (and clatter-feed-hide-channels
+                (clatter-feed--listed-hide-atoms
+                 clatter-feed-hide-channels)))))
 
-(defun clatter-unified--reconcile-hide ()
-  "Sync hide atoms in the unified buffer's invisibility spec."
-  (when-let* ((buf (get-buffer clatter-unified--buffer-name))
+(defun clatter-feed--reconcile-hide ()
+  "Sync hide atoms in the feed buffer's invisibility spec."
+  (when-let* ((buf (get-buffer clatter-feed--buffer-name))
               ((buffer-live-p buf)))
-    (let ((want (clatter-unified--desired-hide-atoms)))
+    (let ((want (clatter-feed--desired-hide-atoms)))
       (with-current-buffer buf
-        (dolist (atom clatter-unified--hidden-atoms)
+        (dolist (atom clatter-feed--hidden-atoms)
           (unless (memq atom want)
             (remove-from-invisibility-spec atom)))
         (dolist (atom want)
           (add-to-invisibility-spec atom))
-        (setq clatter-unified--hidden-atoms want)
+        (setq clatter-feed--hidden-atoms want)
         (force-window-update buf)))))
 
-(defun clatter-unified--clear-hide-atoms ()
-  "Remove hide atoms from the unified buffer's invisibility spec."
-  (when-let* ((buf (get-buffer clatter-unified--buffer-name))
+(defun clatter-feed--clear-hide-atoms ()
+  "Remove hide atoms from the feed buffer's invisibility spec."
+  (when-let* ((buf (get-buffer clatter-feed--buffer-name))
               ((buffer-live-p buf)))
     (with-current-buffer buf
-      (dolist (atom clatter-unified--hidden-atoms)
+      (dolist (atom clatter-feed--hidden-atoms)
         (remove-from-invisibility-spec atom))
-      (setq clatter-unified--hidden-atoms nil)
+      (setq clatter-feed--hidden-atoms nil)
       (force-window-update buf))))
 
-(defun clatter-unified--window-change (_frame)
+(defun clatter-feed--window-change (_frame)
   "Reconcile hide atoms after a window buffer change on FRAME."
-  (clatter-unified--reconcile-hide))
+  (clatter-feed--reconcile-hide))
 
-(defun clatter-unified--sync-hide-hook ()
-  "Install or remove the window hook for `clatter-unified-hide-visible'.
-The hook is only live while unified capture is enabled."
-  (if (and clatter-unified-hide-visible
-           (memq #'clatter-unified--on-privmsg clatter-privmsg-hook))
+(defun clatter-feed--sync-hide-hook ()
+  "Install or remove the window hook for `clatter-feed-hide-visible'.
+The hook is only live while feed capture is enabled."
+  (if (and clatter-feed-hide-visible
+           (memq #'clatter-feed--on-privmsg clatter-privmsg-hook))
       (add-hook 'window-buffer-change-functions
-                #'clatter-unified--window-change)
+                #'clatter-feed--window-change)
     (remove-hook 'window-buffer-change-functions
-                 #'clatter-unified--window-change)))
+                 #'clatter-feed--window-change)))
 
-(defun clatter-unified--set-hide (symbol value)
-  "Set SYMBOL to VALUE and resync the unified hide state."
+(defun clatter-feed--set-hide (symbol value)
+  "Set SYMBOL to VALUE and resync the feed hide state."
   (set-default symbol value)
-  (clatter-unified--sync-hide-hook)
-  (clatter-unified--reconcile-hide))
+  (clatter-feed--sync-hide-hook)
+  (clatter-feed--reconcile-hide))
 
-(defcustom clatter-unified-hide-visible nil
+(defcustom clatter-feed-hide-visible nil
   "When non-nil, hide sources that currently have a live window."
   :type 'boolean
-  :set #'clatter-unified--set-hide
+  :set #'clatter-feed--set-hide
   :group 'clatter)
 
-(defcustom clatter-unified-hide-channels nil
-  "Channel or query names to hide in the unified inbox buffer.
+(defcustom clatter-feed-hide-channels nil
+  "Channel or query names to hide in the feed inbox buffer.
 Case-insensitive; matches every network.  Combined with
-`clatter-unified-hide-visible' when that is also set."
+`clatter-feed-hide-visible' when that is also set."
   :type '(repeat string)
-  :set #'clatter-unified--set-hide
+  :set #'clatter-feed--set-hide
   :group 'clatter)
 
-(defvar clatter-unified-mode-map
+(defvar clatter-feed-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") #'clatter-unified-visit)
+    (define-key map (kbd "RET") #'clatter-feed-visit)
     (define-key map (kbd "q") #'quit-window)
     map)
-  "Keymap for `clatter-unified-mode'.")
+  "Keymap for `clatter-feed-mode'.")
 
-(define-derived-mode clatter-unified-mode clatter-mode "CLatter-Unified"
-  "Major mode for the unified inbox buffer."
+(define-derived-mode clatter-feed-mode clatter-mode "CLatter-Feed"
+  "Major mode for the feed inbox buffer."
   ;; The insert path reads `clatter-message-order' in the destination
   ;; buffer.  This buffer has no prompt and no markers, so insertion
   ;; always appends at point-max; with the global `newest-first' default,
@@ -216,18 +222,18 @@ Case-insensitive; matches every network.  Combined with
   (unless clatter-fools-visible
     (add-to-invisibility-spec 'clatter-fool)))
 
-(defun clatter-unified--buffer ()
-  "Return the unified buffer, creating it on first use."
-  (or (get-buffer clatter-unified--buffer-name)
-      (with-current-buffer (get-buffer-create clatter-unified--buffer-name)
-        (clatter-unified-mode)
-        (clatter-unified--reconcile-hide)
+(defun clatter-feed--buffer ()
+  "Return the feed buffer, creating it on first use."
+  (or (get-buffer clatter-feed--buffer-name)
+      (with-current-buffer (get-buffer-create clatter-feed--buffer-name)
+        (clatter-feed-mode)
+        (clatter-feed--reconcile-hide)
         (current-buffer))))
 
 ;; --- Capture ---
 
-(defun clatter-unified--capture (msg-type conn sender target text server-time)
-  "Insert SENDER's MSG-TYPE TEXT to TARGET on CONN into the unified buffer.
+(defun clatter-feed--capture (msg-type conn sender target text server-time)
+  "Insert SENDER's MSG-TYPE TEXT to TARGET on CONN into the feed buffer.
 SERVER-TIME is the IRCv3 server-time of the message, if any."
   (let* ((network (clatter-connection-network-id conn))
          (my-nick (clatter-connection-nick conn))
@@ -239,17 +245,17 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
                        (if (clatter-nick-equal-p target my-nick case-mapping)
                            sender-nick target)))
          (sender-inv (clatter-sender-invisibility sender network))
-         (invisible (clatter-unified--combine-invisible
+         (invisible (clatter-feed--combine-invisible
                      sender-inv
-                     (clatter-unified--hide-atom network buf-target)))
-         (buf (clatter-unified--buffer))
-         (last (buffer-local-value 'clatter-unified--last-source buf))
+                     (clatter-feed--hide-atom network buf-target)))
+         (buf (clatter-feed--buffer))
+         (last (buffer-local-value 'clatter-feed--last-source buf))
          ;; Note who is tailing the buffer before inserting: windows (and
          ;; the buffer point) at the bottom follow the new message, anyone
          ;; scrolled back stays put.  "At the bottom" is anywhere on the
          ;; last message line, not just point-max: evil's normal state
          ;; never rests point at point-max.
-         (tail-floor (when clatter-unified-autoscroll
+         (tail-floor (when clatter-feed-autoscroll
                        (with-current-buffer buf
                          (save-excursion
                            (goto-char (point-max))
@@ -273,34 +279,35 @@ SERVER-TIME is the IRCv3 server-time of the message, if any."
        (propertize (format "── %s/%s ──" network buf-target)
                    'face 'font-lock-doc-face)
        t nil nil invisible))
-    ;; The source buffer already scanned this message for inline images;
-    ;; scanning again would fetch every URL twice.
-    (let ((clatter--suppress-image-scan t))
-      (clatter-insert-generic msg-type buf sender-nick text conn
-                              server-time invisible
-                              (list 'clatter-unified-network network
-                                    'clatter-unified-target buf-target)))
     (with-current-buffer buf
+      ;; The source buffer already scanned this message for inline images;
+      ;; scanning again would fetch every URL twice.  Inserting with BUF
+      ;; current also prevents this aggregate view from accruing activity.
+      (let ((clatter--suppress-image-scan t))
+        (clatter-insert-generic msg-type buf sender-nick text conn
+                                server-time invisible
+                                (list 'clatter-feed-network network
+                                      'clatter-feed-target buf-target)))
       ;; Mute/fool must not own separator context.  Source-hide is
       ;; temporary, so those lines still do.
       (unless sender-inv
-        (setq clatter-unified--last-source (cons network buf-target)))
+        (setq clatter-feed--last-source (cons network buf-target)))
       (when point-tailing
         (goto-char (point-max)))
       (dolist (w tailing)
         (set-window-point w (point-max))))))
 
-(defun clatter-unified--on-privmsg (conn sender target text server-time)
+(defun clatter-feed--on-privmsg (conn sender target text server-time)
   "Capture SENDER's PRIVMSG TEXT to TARGET on CONN at SERVER-TIME."
-  (clatter-unified--capture 'privmsg conn sender target text server-time))
+  (clatter-feed--capture 'privmsg conn sender target text server-time))
 
-(defun clatter-unified--on-action (conn sender target text server-time)
+(defun clatter-feed--on-action (conn sender target text server-time)
   "Capture SENDER's ACTION TEXT to TARGET on CONN at SERVER-TIME."
-  (clatter-unified--capture 'action conn sender target text server-time))
+  (clatter-feed--capture 'action conn sender target text server-time))
 
 ;; --- Jump back to the source ---
 
-(defun clatter-unified--find-message (buffer sender text server-time)
+(defun clatter-feed--find-message (buffer sender text server-time)
   "Return the position of SENDER's TEXT in BUFFER, or nil.
 Fallback for servers without message IDs.  With several matches, prefer
 the one nearest SERVER-TIME, else the newest."
@@ -337,11 +344,11 @@ the one nearest SERVER-TIME, else the newest."
                   (setq best pos
                         best-delta delta)))))))))))
 
-(defun clatter-unified-visit ()
+(defun clatter-feed-visit ()
   "Jump to the source buffer of the message at point."
   (interactive)
-  (let ((network (get-text-property (point) 'clatter-unified-network))
-        (target (get-text-property (point) 'clatter-unified-target))
+  (let ((network (get-text-property (point) 'clatter-feed-network))
+        (target (get-text-property (point) 'clatter-feed-target))
         (msgid (get-text-property (point) 'clatter-msgid))
         (sender (get-text-property (point) 'clatter-sender))
         (text (get-text-property (point) 'clatter-text))
@@ -356,7 +363,7 @@ the one nearest SERVER-TIME, else the newest."
       ;; at an arbitrary point.  A stale msgid falls through to the
       ;; sender+text match.
       (let ((pos (or (clatter--find-message-position-by-msgid buf msgid)
-                     (clatter-unified--find-message buf sender text
+                     (clatter-feed--find-message buf sender text
                                                     server-time))))
         (unless pos
           (user-error "Message not found in %s" (buffer-name buf)))
@@ -367,28 +374,28 @@ the one nearest SERVER-TIME, else the newest."
 
 ;; --- Setup ---
 
-(defun clatter-unified-enable ()
-  "Start collecting messages into the unified buffer."
+(defun clatter-feed-enable ()
+  "Start collecting messages into the feed buffer."
   (interactive)
-  (add-hook 'clatter-privmsg-hook #'clatter-unified--on-privmsg)
-  (add-hook 'clatter-action-hook #'clatter-unified--on-action)
-  (clatter-unified--sync-hide-hook)
-  (clatter-unified--reconcile-hide))
+  (add-hook 'clatter-privmsg-hook #'clatter-feed--on-privmsg)
+  (add-hook 'clatter-action-hook #'clatter-feed--on-action)
+  (clatter-feed--sync-hide-hook)
+  (clatter-feed--reconcile-hide))
 
-(defun clatter-unified-disable ()
-  "Stop collecting messages into the unified buffer."
+(defun clatter-feed-disable ()
+  "Stop collecting messages into the feed buffer."
   (interactive)
-  (remove-hook 'clatter-privmsg-hook #'clatter-unified--on-privmsg)
-  (remove-hook 'clatter-action-hook #'clatter-unified--on-action)
+  (remove-hook 'clatter-privmsg-hook #'clatter-feed--on-privmsg)
+  (remove-hook 'clatter-action-hook #'clatter-feed--on-action)
   (remove-hook 'window-buffer-change-functions
-               #'clatter-unified--window-change)
-  (clatter-unified--clear-hide-atoms))
+               #'clatter-feed--window-change)
+  (clatter-feed--clear-hide-atoms))
 
-(defun clatter-unified ()
-  "Display the unified inbox buffer."
+(defun clatter-feed ()
+  "Display the feed inbox buffer."
   (interactive)
-  (pop-to-buffer (clatter-unified--buffer)))
+  (pop-to-buffer (clatter-feed--buffer)))
 
-(provide 'clatter-unified)
+(provide 'clatter-feed)
 
-;;; clatter-unified.el ends here
+;;; clatter-feed.el ends here

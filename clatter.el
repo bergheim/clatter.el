@@ -63,7 +63,7 @@
 (require 'clatter-nicklist)
 (require 'clatter-log)
 (require 'clatter-url-preview)
-(require 'clatter-unified)
+(require 'clatter-feed)
 (require 'clatter-evil)
 (require 'clatter-soju)
 
@@ -142,7 +142,7 @@ your configuration to wire everything up:
 This installs the disconnect and Emacs-exit cleanup handlers and enables
 the optional extras that are turned on through their own user options:
 activity tracking, desktop notifications, chathistory, read markers,
-per-buffer logging, URL previews and the unified inbox buffer.  To leave
+per-buffer logging, URL previews and the feed inbox buffer.  To leave
 a feature off, customize the corresponding option (for example
 `clatter-track-enabled' or `clatter-log-enable') to nil before calling
 this function.
@@ -164,7 +164,7 @@ Calling it more than once is harmless."
   (when clatter-log-enable (clatter-log-init))
   (when clatter-url-preview-enable (clatter-url-preview-init))
   (when clatter-soju-enabled (clatter-soju-enable))
-  (when clatter-unified-enabled (clatter-unified-enable)))
+  (when clatter-feed-enabled (clatter-feed-enable)))
 
 (provide 'clatter)
 

@@ -883,7 +883,7 @@ and fetch images for hundreds of old messages at once.")
   "Insert a MSG-TYPE from SENDER with TEXT into BUFFER using CONN context.
 SERVER-TIME overrides the current time for the timestamp.  EXTRA-PROPS is
 an optional plist appended to the text properties otherwise passed to
-`clatter--insert-message' (used by `clatter-unified' to stash the source
+`clatter--insert-message' (used by `clatter-feed' to stash the source
 network/target for jump-back)."
   (let* ((nick-face (clatter-hl-nick-face sender conn))
          (my-nick (clatter-connection-nick conn))

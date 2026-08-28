@@ -11,8 +11,8 @@ Bindings are deferred behind `with-eval-after-load', so the vanilla
 keymaps keep their own definitions."
   (should (featurep 'clatter-evil))
   (should-not (featurep 'evil))
-  (should (eq (lookup-key clatter-unified-mode-map (kbd "RET"))
-              #'clatter-unified-visit))
+  (should (eq (lookup-key clatter-feed-mode-map (kbd "RET"))
+              #'clatter-feed-visit))
   (should (eq (lookup-key clatter-nicklist-mode-map (kbd "RET"))
               #'clatter-nicklist-query)))
 

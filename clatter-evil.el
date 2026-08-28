@@ -15,14 +15,14 @@
 ;;; Code:
 
 (require 'clatter-nicklist)
-(require 'clatter-unified)
+(require 'clatter-feed)
 
 (declare-function evil-define-key* "evil-core")
 
 (defun clatter-evil--setup ()
   "Install normal-state bindings for clatter's special buffers."
-  (evil-define-key* 'normal clatter-unified-mode-map
-    (kbd "RET") #'clatter-unified-visit
+  (evil-define-key* 'normal clatter-feed-mode-map
+    (kbd "RET") #'clatter-feed-visit
     "q" #'quit-window)
   (evil-define-key* 'normal clatter-nicklist-mode-map
     (kbd "RET") #'clatter-nicklist-query

@@ -1,40 +1,40 @@
-;;; test-unified.el --- Tests for clatter-unified.el -*- lexical-binding: t; -*-
+;;; test-feed.el --- Tests for clatter-feed.el -*- lexical-binding: t; -*-
 
 ;;; Code:
 
 (require 'test-helper)
 (require 'clatter-ui)
 (require 'clatter-pals)
-(require 'clatter-unified)
+(require 'clatter-feed)
 
 ;;; Helpers
 
-(defun clatter-test-unified--buffer ()
-  "Return the live unified buffer, or nil."
-  (when-let* ((buf (get-buffer clatter-unified--buffer-name))
+(defun clatter-test-feed--buffer ()
+  "Return the live feed buffer, or nil."
+  (when-let* ((buf (get-buffer clatter-feed--buffer-name))
               ((buffer-live-p buf)))
     buf))
 
-(defun clatter-test-unified--kill-buffer ()
-  "Kill the unified buffer if it exists."
-  (when-let* ((buf (get-buffer clatter-unified--buffer-name))
+(defun clatter-test-feed--kill-buffer ()
+  "Kill the feed buffer if it exists."
+  (when-let* ((buf (get-buffer clatter-feed--buffer-name))
               ((buffer-live-p buf)))
     (let ((kill-buffer-query-functions nil))
       (kill-buffer buf))))
 
-(defmacro clatter-test-unified--with-capture (conn &rest body)
+(defmacro clatter-test-feed--with-capture (conn &rest body)
   "Run BODY with CONN bound to a mock connection, then clean up.
 
-Removes the unified buffer and any clatter buffers BODY created, and
-unregisters the unified hooks whether or not BODY enabled them."
+Removes the feed buffer and any clatter buffers BODY created, and
+unregisters the feed hooks whether or not BODY enabled them."
   (declare (indent 1))
   `(let ((initial-buffers clatter--buffer-alist)
          (,conn (clatter-test-make-connection)))
-     (clatter-test-unified--kill-buffer)
+     (clatter-test-feed--kill-buffer)
      (unwind-protect
          (progn ,@body)
-       (clatter-unified-disable)
-       (clatter-test-unified--kill-buffer)
+       (clatter-feed-disable)
+       (clatter-test-feed--kill-buffer)
        (dolist (entry clatter--buffer-alist)
          (when (and (not (memq entry initial-buffers))
                     (buffer-live-p (cdr entry)))
@@ -42,7 +42,7 @@ unregisters the unified hooks whether or not BODY enabled them."
        (setq clatter--buffer-alist initial-buffers)
        (clatter-test-cleanup))))
 
-(defun clatter-test-unified--line-bol (buffer text)
+(defun clatter-test-feed--line-bol (buffer text)
   "Return the bol of the line in BUFFER whose text contains TEXT, or nil."
   (with-current-buffer buffer
     (save-excursion
@@ -51,7 +51,7 @@ unregisters the unified hooks whether or not BODY enabled them."
         (beginning-of-line)
         (point)))))
 
-(defun clatter-test-unified--nick-column-at (buffer bol)
+(defun clatter-test-feed--nick-column-at (buffer bol)
   "Return the visible nick-column text at BOL in BUFFER."
   (with-current-buffer buffer
     (save-excursion
@@ -59,12 +59,12 @@ unregisters the unified hooks whether or not BODY enabled them."
       (buffer-substring-no-properties
        bol (min (+ bol clatter-nick-column-width) (line-end-position))))))
 
-(defun clatter-test-unified--string (buffer)
+(defun clatter-test-feed--string (buffer)
   "Return the unpropertized contents of BUFFER."
   (with-current-buffer buffer
     (buffer-substring-no-properties (point-min) (point-max))))
 
-(defun clatter-test-unified--count (buffer regexp)
+(defun clatter-test-feed--count (buffer regexp)
   "Return the number of lines in BUFFER matching REGEXP."
   (with-current-buffer buffer
     (save-excursion
@@ -74,7 +74,7 @@ unregisters the unified hooks whether or not BODY enabled them."
           (setq count (1+ count)))
         count))))
 
-(defun clatter-test-unified--separator-pos (buffer label)
+(defun clatter-test-feed--separator-pos (buffer label)
   "Return the position of the LABEL text inside a separator line in BUFFER."
   (with-current-buffer buffer
     (save-excursion
@@ -84,55 +84,56 @@ unregisters the unified hooks whether or not BODY enabled them."
 
 ;;; Hook registration
 
-(ert-deftest clatter-test-unified-enable-registers-hooks ()
+(ert-deftest clatter-test-feed-enable-registers-hooks ()
   "Enabling adds both live message hooks; disabling removes them."
   (unwind-protect
       (progn
-        (clatter-unified-enable)
-        (should (memq #'clatter-unified--on-privmsg
+        (clatter-feed-enable)
+        (should (memq #'clatter-feed--on-privmsg
                       (default-value 'clatter-privmsg-hook)))
-        (should (memq #'clatter-unified--on-action
+        (should (memq #'clatter-feed--on-action
                       (default-value 'clatter-action-hook)))
-        (clatter-unified-disable)
-        (should-not (memq #'clatter-unified--on-privmsg
+        (clatter-feed-disable)
+        (should-not (memq #'clatter-feed--on-privmsg
                           (default-value 'clatter-privmsg-hook)))
-        (should-not (memq #'clatter-unified--on-action
+        (should-not (memq #'clatter-feed--on-action
                           (default-value 'clatter-action-hook))))
-    (clatter-unified-disable)))
+    (clatter-feed-disable)))
 
-(ert-deftest clatter-test-unified-disabled-by-default ()
-  "The unified buffer is opt-in."
-  (should-not (default-value 'clatter-unified-enabled)))
+(ert-deftest clatter-test-feed-disabled-by-default ()
+  "The feed buffer is opt-in."
+  (should-not (default-value 'clatter-feed-enabled)))
 
 ;;; Rendering
 
-(ert-deftest clatter-test-unified-channel-privmsg-renders ()
+(ert-deftest clatter-test-feed-channel-privmsg-renders ()
   "A channel PRIVMSG creates the buffer lazily and renders with a separator."
-  (clatter-test-unified--with-capture conn
-    (should-not (clatter-test-unified--buffer))
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (should-not (clatter-test-feed--buffer))
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "hello there" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (should buf)
-      (let ((text (clatter-test-unified--string buf)))
+      (should (= 0 (buffer-local-value 'clatter--unread-count buf)))
+      (let ((text (clatter-test-feed--string buf)))
         (should (string-match-p "──[^\n]*testnet/#emacs" text))
         (should (string-match-p "<alice>" text))
         (should (string-match-p "hello there" text)))
       ;; The separator is doc-faced and carries no sender, so grouping
       ;; and navigation both skip it.
-      (let ((sep (clatter-test-unified--separator-pos buf "testnet/#emacs")))
+      (let ((sep (clatter-test-feed--separator-pos buf "testnet/#emacs")))
         (should sep)
         (with-current-buffer buf
           (should (memq 'font-lock-doc-face
                         (ensure-list (get-text-property sep 'face))))
           (should-not (get-text-property sep 'clatter-sender))))
       ;; The message line carries its source for jump-back.
-      (let ((bol (clatter-test-unified--line-bol buf "hello there")))
+      (let ((bol (clatter-test-feed--line-bol buf "hello there")))
         (should bol)
         (with-current-buffer buf
-          (should (equal (get-text-property bol 'clatter-unified-network)
+          (should (equal (get-text-property bol 'clatter-feed-network)
                          "testnet"))
-          (should (equal (get-text-property bol 'clatter-unified-target)
+          (should (equal (get-text-property bol 'clatter-feed-target)
                          "#emacs"))
           (should (equal (get-text-property bol 'clatter-sender) "alice"))
           (should (eq (get-text-property bol 'clatter-msg-type) 'privmsg))))
@@ -145,112 +146,112 @@ unregisters the unified hooks whether or not BODY enabled them."
                         (ensure-list
                          (get-text-property nick-pos 'face)))))))))
 
-(ert-deftest clatter-test-unified-action-renders ()
+(ert-deftest clatter-test-feed-action-renders ()
   "A CTCP ACTION renders with action formatting and its source props."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-action conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-action conn '("alice" "user" "host") "#emacs"
                                 "waves" nil)
-    (let* ((buf (clatter-test-unified--buffer))
-           (bol (and buf (clatter-test-unified--line-bol buf "waves"))))
+    (let* ((buf (clatter-test-feed--buffer))
+           (bol (and buf (clatter-test-feed--line-bol buf "waves"))))
       (should buf)
       (should bol)
-      (should (string-match-p "\\*" (clatter-test-unified--nick-column-at
+      (should (string-match-p "\\*" (clatter-test-feed--nick-column-at
                                      buf bol)))
       (with-current-buffer buf
         (should (eq (get-text-property bol 'clatter-msg-type) 'action))
-        (should (equal (get-text-property bol 'clatter-unified-target)
+        (should (equal (get-text-property bol 'clatter-feed-target)
                        "#emacs"))))))
 
 ;;; Grouping and separators
 
-(ert-deftest clatter-test-unified-groups-consecutive-same-sender ()
+(ert-deftest clatter-test-feed-groups-consecutive-same-sender ()
   "Two messages from one nick in one channel show the nick once."
   (let ((clatter-group-messages-by-nick t))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "first" nil)
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "second" nil)
-      (let* ((buf (clatter-test-unified--buffer))
-             (first-bol (clatter-test-unified--line-bol buf "first"))
-             (second-bol (clatter-test-unified--line-bol buf "second")))
+      (let* ((buf (clatter-test-feed--buffer))
+             (first-bol (clatter-test-feed--line-bol buf "first"))
+             (second-bol (clatter-test-feed--line-bol buf "second")))
         (should first-bol)
         (should second-bol)
         (should (string-match-p
-                 "<alice>" (clatter-test-unified--nick-column-at
+                 "<alice>" (clatter-test-feed--nick-column-at
                             buf first-bol)))
         (should (string-match-p
-                 "\\` *\\'" (clatter-test-unified--nick-column-at
+                 "\\` *\\'" (clatter-test-feed--nick-column-at
                              buf second-bol)))
         ;; The blanked line keeps its sender metadata.
         (with-current-buffer buf
           (should (equal (get-text-property second-bol 'clatter-sender)
                          "alice")))
         ;; One channel run, one separator.
-        (should (= 1 (clatter-test-unified--count
+        (should (= 1 (clatter-test-feed--count
                       buf "──[^\n]*testnet/#emacs")))))))
 
-(ert-deftest clatter-test-unified-separator-breaks-grouping-across-channels ()
+(ert-deftest clatter-test-feed-separator-breaks-grouping-across-channels ()
   "The same nick alternating between channels gets a separator each time."
   (let ((clatter-group-messages-by-nick t))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "first" nil)
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#lisp"
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#lisp"
                                    "second" nil)
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "third" nil)
-      (let ((buf (clatter-test-unified--buffer)))
+      (let ((buf (clatter-test-feed--buffer)))
         ;; Each source change emits its own separator.
-        (should (= 2 (clatter-test-unified--count
+        (should (= 2 (clatter-test-feed--count
                       buf "──[^\n]*testnet/#emacs")))
-        (should (= 1 (clatter-test-unified--count
+        (should (= 1 (clatter-test-feed--count
                       buf "──[^\n]*testnet/#lisp")))
         ;; The separator broke the burst: every line shows its nick.
         (dolist (text '("first" "second" "third"))
-          (let ((bol (clatter-test-unified--line-bol buf text)))
+          (let ((bol (clatter-test-feed--line-bol buf text)))
             (should bol)
             (should (string-match-p
-                     "<alice>" (clatter-test-unified--nick-column-at
+                     "<alice>" (clatter-test-feed--nick-column-at
                                 buf bol)))))
         ;; Each line points back at its own channel.
         (with-current-buffer buf
           (should (equal (get-text-property
-                          (clatter-test-unified--line-bol buf "second")
-                          'clatter-unified-target)
+                          (clatter-test-feed--line-bol buf "second")
+                          'clatter-feed-target)
                          "#lisp"))
           (should (equal (get-text-property
-                          (clatter-test-unified--line-bol buf "third")
-                          'clatter-unified-target)
+                          (clatter-test-feed--line-bol buf "third")
+                          'clatter-feed-target)
                          "#emacs")))))))
 
-(ert-deftest clatter-test-unified-query-keyed-by-sender ()
+(ert-deftest clatter-test-feed-query-keyed-by-sender ()
   "A message addressed to my nick is keyed by the sender's nick."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     ;; TARGET is my nick, so the source is the query with alice.
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "testnick"
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "testnick"
                                  "psst" nil)
-    (let* ((buf (clatter-test-unified--buffer))
-           (bol (and buf (clatter-test-unified--line-bol buf "psst"))))
+    (let* ((buf (clatter-test-feed--buffer))
+           (bol (and buf (clatter-test-feed--line-bol buf "psst"))))
       (should buf)
       (should bol)
-      (should (clatter-test-unified--separator-pos buf "testnet/alice"))
+      (should (clatter-test-feed--separator-pos buf "testnet/alice"))
       (should-not (string-match-p "testnet/testnick"
-                                  (clatter-test-unified--string buf)))
+                                  (clatter-test-feed--string buf)))
       (with-current-buffer buf
-        (should (equal (get-text-property bol 'clatter-unified-target)
+        (should (equal (get-text-property bol 'clatter-feed-target)
                        "alice"))
-        (should (equal (get-text-property bol 'clatter-unified-network)
+        (should (equal (get-text-property bol 'clatter-feed-network)
                        "testnet"))))))
 
 ;;; Highlighting and filtering
 
-(ert-deftest clatter-test-unified-mention-gets-mention-face ()
+(ert-deftest clatter-test-feed-mention-gets-mention-face ()
   "Text containing my nick for that connection is mention-faced."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "testnick: ping" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (should buf)
       (with-current-buffer buf
         (goto-char (point-min))
@@ -259,16 +260,16 @@ unregisters the unified hooks whether or not BODY enabled them."
                       (ensure-list (get-text-property (match-beginning 0)
                                                       'face))))))))
 
-(ert-deftest clatter-test-unified-muted-sender-line-is-invisible ()
+(ert-deftest clatter-test-feed-muted-sender-line-is-invisible ()
   "A fool's captured line is actually hidden, not merely propertied.
-The mode must seed `buffer-invisibility-spec' itself: the unified buffer
+The mode must seed `buffer-invisibility-spec' itself: the feed buffer
 never goes through `clatter-ui-setup-buffer'."
   (let ((clatter-fools '("troll")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("troll" "user" "host") "#emacs"
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("troll" "user" "host") "#emacs"
                                    "bait" nil)
-      (let* ((buf (clatter-test-unified--buffer))
-             (bol (and buf (clatter-test-unified--line-bol buf "bait"))))
+      (let* ((buf (clatter-test-feed--buffer))
+             (bol (and buf (clatter-test-feed--line-bol buf "bait"))))
         (should buf)
         (should bol)
         (with-current-buffer buf
@@ -279,34 +280,34 @@ never goes through `clatter-ui-setup-buffer'."
           (should (memq 'muted buffer-invisibility-spec))
           (should (invisible-p bol)))))))
 
-(ert-deftest clatter-test-unified-ignored-sender-uses-muted-category ()
+(ert-deftest clatter-test-feed-ignored-sender-uses-muted-category ()
   "An ignore-list sender's line is hidden under the `muted' category."
   ;; Ignore patterns match the full nick!user@host prefix.
   (let ((clatter-ignore-list '("troll!*")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("troll" "user" "host") "#emacs"
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("troll" "user" "host") "#emacs"
                                    "bait" nil)
-      (let* ((buf (clatter-test-unified--buffer))
-             (bol (and buf (clatter-test-unified--line-bol buf "bait"))))
+      (let* ((buf (clatter-test-feed--buffer))
+             (bol (and buf (clatter-test-feed--line-bol buf "bait"))))
         (should buf)
         (should bol)
         (with-current-buffer buf
           (should (memq 'muted (ensure-list (get-text-property bol 'invisible))))
           (should (invisible-p bol)))))))
 
-(ert-deftest clatter-test-unified-hidden-sender-separator-is-hidden ()
+(ert-deftest clatter-test-feed-hidden-sender-separator-is-hidden ()
   "A hidden sender's separator is hidden too, and does not claim the source.
 The next visible message from that channel still gets a visible separator."
   (let ((clatter-fools '("troll")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#alpha"
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#alpha"
                                    "hi" nil)
-      (clatter-unified--on-privmsg conn '("troll" "user" "host") "#beta"
+      (clatter-feed--on-privmsg conn '("troll" "user" "host") "#beta"
                                    "bait" nil)
-      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#beta"
+      (clatter-feed--on-privmsg conn '("bob" "user" "host") "#beta"
                                    "real talk" nil)
-      (let ((buf (clatter-test-unified--buffer)))
-        (should (= 2 (clatter-test-unified--count buf "──[^\n]*testnet/#beta")))
+      (let ((buf (clatter-test-feed--buffer)))
+        (should (= 2 (clatter-test-feed--count buf "──[^\n]*testnet/#beta")))
         (with-current-buffer buf
           (goto-char (point-min))
           (re-search-forward "──[^\n]*testnet/#beta")
@@ -314,29 +315,29 @@ The next visible message from that channel still gets a visible separator."
           (re-search-forward "──[^\n]*testnet/#beta")
           (should-not (invisible-p (match-beginning 0))))))))
 
-(ert-deftest clatter-test-unified-image-scan-suppressed ()
+(ert-deftest clatter-test-feed-image-scan-suppressed ()
   "Capture never re-scans message text for inline images.
 The source channel buffer already scanned; a second scan would fetch
 every URL twice."
   (let ((calls 0))
     (cl-letf (((symbol-function 'clatter-image--scan-message)
                (lambda (&rest _) (cl-incf calls))))
-      (clatter-test-unified--with-capture conn
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+      (clatter-test-feed--with-capture conn
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      "look https://example.com/cat.png" nil)
         (should (string-match-p
-                 "cat\\.png" (clatter-test-unified--string
-                              (clatter-test-unified--buffer))))
+                 "cat\\.png" (clatter-test-feed--string
+                              (clatter-test-feed--buffer))))
         (should (= calls 0))))))
 
 ;;; Buffer properties
 
-(ert-deftest clatter-test-unified-buffer-is-read-only ()
-  "The unified buffer has no input area, so typing into it is blocked."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+(ert-deftest clatter-test-feed-buffer-is-read-only ()
+  "The feed buffer has no input area, so typing into it is blocked."
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "hello" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (should buf)
       (should (buffer-local-value 'buffer-read-only buf))
       (should-error (with-current-buffer buf
@@ -344,27 +345,27 @@ every URL twice."
                       (insert "stray"))
                     :type 'buffer-read-only))))
 
-(ert-deftest clatter-test-unified-truncation-keeps-newest ()
+(ert-deftest clatter-test-feed-truncation-keeps-newest ()
   "Truncation deletes the oldest lines and keeps the newest capture.
 
 Regression: the buffer is oldest-first regardless of the user's global
 `clatter-message-order', so truncation must cut from the top."
   (let ((clatter-buffer-max-lines 4))
-    (clatter-test-unified--with-capture conn
+    (clatter-test-feed--with-capture conn
       (dotimes (i 12)
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      (format "line-%02d" i) nil))
-      (let* ((buf (clatter-test-unified--buffer))
-             (text (clatter-test-unified--string buf)))
+      (let* ((buf (clatter-test-feed--buffer))
+             (text (clatter-test-feed--string buf)))
         (should (string-match-p "line-11" text))
         (should-not (string-match-p "line-00" text))))))
 
 ;;; Batch safety
 
-(ert-deftest clatter-test-unified-batched-messages-do-not-appear ()
-  "Batched (chathistory) traffic never reaches the unified buffer."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified-enable)
+(ert-deftest clatter-test-feed-batched-messages-do-not-appear ()
+  "Batched (chathistory) traffic never reaches the feed buffer."
+  (clatter-test-feed--with-capture conn
+    (clatter-feed-enable)
     (clatter-dispatch-message
      conn (clatter-test-parse ":server BATCH +history chathistory #emacs"))
     (clatter-dispatch-message
@@ -373,85 +374,85 @@ Regression: the buffer is oldest-first regardless of the user's global
     (clatter-dispatch-message
      conn (clatter-test-parse ":server BATCH -history"))
     ;; Nothing was captured, so the buffer was never even created.
-    (should-not (clatter-test-unified--buffer))))
+    (should-not (clatter-test-feed--buffer))))
 
-(ert-deftest clatter-test-unified-live-message-reaches-buffer-through-hook ()
+(ert-deftest clatter-test-feed-live-message-reaches-buffer-through-hook ()
   "An unbatched PRIVMSG dispatched normally is captured via the hook."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified-enable)
+  (clatter-test-feed--with-capture conn
+    (clatter-feed-enable)
     (run-hook-with-args 'clatter-privmsg-hook
                         conn '("alice" "user" "host") "#emacs" "live" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (should buf)
-      (should (string-match-p "live" (clatter-test-unified--string buf))))))
+      (should (string-match-p "live" (clatter-test-feed--string buf))))))
 
 ;;; Jump back to the source message
 
-(ert-deftest clatter-test-unified-visit-jumps-to-source-message ()
+(ert-deftest clatter-test-feed-visit-jumps-to-source-message ()
   "RET on a captured line lands on that message in the source buffer."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     (let ((text (propertize "jumpable" 'clatter-msgid "msg-42")))
       (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs" text nil)
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    text nil))
     (let ((chan (clatter-get-buffer "testnet" "#emacs"))
-          (unified (clatter-test-unified--buffer)))
+          (feed (clatter-test-feed--buffer)))
       (should chan)
-      (should unified)
+      (should feed)
       (should (clatter--find-message-position-by-msgid chan "msg-42"))
       (save-window-excursion
-        (with-current-buffer unified
-          (goto-char (clatter-test-unified--line-bol unified "jumpable"))
-          (clatter-unified-visit)
+        (with-current-buffer feed
+          (goto-char (clatter-test-feed--line-bol feed "jumpable"))
+          (clatter-feed-visit)
           ;; Visiting pops to the source buffer...
           (should (eq (current-buffer) chan))))
       ;; ...and leaves point on the referenced message.
       (with-current-buffer chan
         (should (equal (get-text-property (point) 'clatter-msgid) "msg-42"))))))
 
-(ert-deftest clatter-test-unified-visit-dead-source-signals-user-error ()
+(ert-deftest clatter-test-feed-visit-dead-source-signals-user-error ()
   "Visiting a line whose source buffer is gone reports an error, not a jump."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     (let ((text (propertize "orphan" 'clatter-msgid "msg-99")))
       (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs" text nil)
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    text nil))
     (let ((chan (clatter-get-buffer "testnet" "#emacs"))
-          (unified (clatter-test-unified--buffer)))
+          (feed (clatter-test-feed--buffer)))
       (should chan)
-      (should unified)
+      (should feed)
       (kill-buffer chan)
       (clatter-remove-buffer "testnet" "#emacs")
       (save-window-excursion
-        (with-current-buffer unified
-          (goto-char (clatter-test-unified--line-bol unified "orphan"))
-          (should-error (clatter-unified-visit) :type 'user-error))))))
+        (with-current-buffer feed
+          (goto-char (clatter-test-feed--line-bol feed "orphan"))
+          (should-error (clatter-feed-visit) :type 'user-error))))))
 
 ;;; Autoscroll
 
-(ert-deftest clatter-test-unified-autoscroll-follows-at-bottom ()
+(ert-deftest clatter-test-feed-autoscroll-follows-at-bottom ()
   "A window sitting at end-of-buffer advances with each new message."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "first" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (save-window-excursion
         (set-window-buffer (selected-window) buf)
         (set-window-point (selected-window) (with-current-buffer buf
                                               (point-max)))
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      "second" nil)
         (should (= (window-point (selected-window))
                    (with-current-buffer buf (point-max))))))))
 
-(ert-deftest clatter-test-unified-autoscroll-follows-on-last-line ()
+(ert-deftest clatter-test-feed-autoscroll-follows-on-last-line ()
   "Point at the beginning of the last message line counts as tailing.
 Evil's normal state never rests point at point-max, so bottom detection
 must accept anywhere on the last line."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "first" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (save-window-excursion
         (set-window-buffer (selected-window) buf)
         ;; Land on the last message line's bol, the way evil G does.
@@ -461,105 +462,105 @@ must accept anywhere on the last line."
                               (goto-char (point-max))
                               (forward-line -1)
                               (point))))
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      "second" nil)
         (should (= (window-point (selected-window))
                    (with-current-buffer buf (point-max))))))))
 
-(ert-deftest clatter-test-unified-autoscroll-leaves-scrolled-back-window ()
+(ert-deftest clatter-test-feed-autoscroll-leaves-scrolled-back-window ()
   "A window scrolled away from the bottom stays where it is."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "first" nil)
-    (let ((buf (clatter-test-unified--buffer)))
+    (let ((buf (clatter-test-feed--buffer)))
       (save-window-excursion
         (set-window-buffer (selected-window) buf)
         (set-window-point (selected-window) (point-min))
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      "second" nil)
         (should (= (window-point (selected-window)) (point-min)))))))
 
-(ert-deftest clatter-test-unified-autoscroll-disabled-stays-put ()
-  "With `clatter-unified-autoscroll' nil, even a bottom window stays."
-  (let ((clatter-unified-autoscroll nil))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+(ert-deftest clatter-test-feed-autoscroll-disabled-stays-put ()
+  "With `clatter-feed-autoscroll' nil, even a bottom window stays."
+  (let ((clatter-feed-autoscroll nil))
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "first" nil)
-      (let* ((buf (clatter-test-unified--buffer))
+      (let* ((buf (clatter-test-feed--buffer))
              (end (with-current-buffer buf (point-max))))
         (save-window-excursion
           (set-window-buffer (selected-window) buf)
           (set-window-point (selected-window) end)
-          (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+          (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                        "second" nil)
           (should (= (window-point (selected-window)) end))
           (should (< end (with-current-buffer buf (point-max)))))))))
 
-(ert-deftest clatter-test-unified-autoscroll-buffer-point-follows ()
+(ert-deftest clatter-test-feed-autoscroll-buffer-point-follows ()
   "With no window, the buffer point tails so the first view shows the newest."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     (dotimes (i 3)
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    (format "msg-%d" i) nil))
-    (with-current-buffer (clatter-test-unified--buffer)
+    (with-current-buffer (clatter-test-feed--buffer)
       (should (= (point) (point-max))))))
 
-(ert-deftest clatter-test-unified-visit-falls-back-without-msgid ()
+(ert-deftest clatter-test-feed-visit-falls-back-without-msgid ()
   "Without a msgid, RET matches the message by sender and text."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs"
                             "findme" nil)
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "findme" nil)
     (let ((chan (clatter-get-buffer "testnet" "#emacs"))
-          (unified (clatter-test-unified--buffer)))
+          (feed (clatter-test-feed--buffer)))
       (save-window-excursion
-        (with-current-buffer unified
-          (goto-char (clatter-test-unified--line-bol unified "findme"))
+        (with-current-buffer feed
+          (goto-char (clatter-test-feed--line-bol feed "findme"))
           (should-not (get-text-property (point) 'clatter-msgid))
-          (clatter-unified-visit)
+          (clatter-feed-visit)
           (should (eq (current-buffer) chan))))
       (with-current-buffer chan
         (should (equal (get-text-property (point) 'clatter-text) "findme"))))))
 
-(ert-deftest clatter-test-unified-visit-stale-msgid-falls-back-to-text ()
+(ert-deftest clatter-test-feed-visit-stale-msgid-falls-back-to-text ()
   "A msgid the source buffer no longer has falls back to the text match."
-  (clatter-test-unified--with-capture conn
-    ;; The channel line has no msgid; the unified line carries a stale one.
+  (clatter-test-feed--with-capture conn
+    ;; The channel line has no msgid; the feed line carries a stale one.
     (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs"
                             "stale" nil)
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  (propertize "stale" 'clatter-msgid "gone-1")
                                  nil)
     (let ((chan (clatter-get-buffer "testnet" "#emacs"))
-          (unified (clatter-test-unified--buffer)))
+          (feed (clatter-test-feed--buffer)))
       (save-window-excursion
-        (with-current-buffer unified
-          (goto-char (clatter-test-unified--line-bol unified "stale"))
+        (with-current-buffer feed
+          (goto-char (clatter-test-feed--line-bol feed "stale"))
           (should (equal (get-text-property (point) 'clatter-msgid) "gone-1"))
-          (clatter-unified-visit)
+          (clatter-feed-visit)
           (should (eq (current-buffer) chan))))
       (with-current-buffer chan
         (should (equal (get-text-property (point) 'clatter-text) "stale"))))))
 
-(ert-deftest clatter-test-unified-visit-missing-message-signals-user-error ()
+(ert-deftest clatter-test-feed-visit-missing-message-signals-user-error ()
   "A message the source buffer never had (or truncated) errors out."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     ;; The channel buffer exists but never received the message.
     (clatter-get-or-create-buffer "testnet" "#emacs" 'channel)
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "vanished" nil)
-    (let ((unified (clatter-test-unified--buffer)))
+    (let ((feed (clatter-test-feed--buffer)))
       (save-window-excursion
-        (with-current-buffer unified
-          (goto-char (clatter-test-unified--line-bol unified "vanished"))
-          (should-error (clatter-unified-visit) :type 'user-error))))))
+        (with-current-buffer feed
+          (goto-char (clatter-test-feed--line-bol feed "vanished"))
+          (should-error (clatter-feed-visit) :type 'user-error))))))
 
-(ert-deftest clatter-test-unified-fallback-prefers-newest-match ()
+(ert-deftest clatter-test-feed-fallback-prefers-newest-match ()
   "With duplicate sender+text and no server-time, the newest match wins.
 Regression: under the default `newest-first' order the newest message is
 at the top of the source buffer, not the bottom."
-  (clatter-test-unified--with-capture conn
+  (clatter-test-feed--with-capture conn
     (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs" "dup" nil)
     (clatter-ui--on-privmsg conn '("alice" "user" "host") "#emacs" "dup" nil)
     (let* ((chan (clatter-get-buffer "testnet" "#emacs"))
@@ -577,116 +578,123 @@ at the top of the source buffer, not the bottom."
       ;; Default order is newest-first: the newest of the two duplicates
       ;; is the earlier buffer position.
       (should (eq clatter-message-order 'newest-first))
-      (should (= (clatter-unified--find-message chan "alice" "dup" nil)
+      (should (= (clatter-feed--find-message chan "alice" "dup" nil)
                  (car matches))))))
 
 ;;; Hide
 
-(ert-deftest clatter-test-unified-hide-nil-stamps-atom-but-shows ()
+(ert-deftest clatter-test-feed-hide-atoms-are-stable-and-uninterned ()
+  "Source atoms remain stable without leaking into the global obarray."
+  (let* ((name "clatter-feed-hide:testnet/#fresh")
+         (atom (clatter-feed--hide-atom "testnet" "#fresh")))
+    (should (eq atom (clatter-feed--hide-atom "testnet" "#FRESH")))
+    (should-not (intern-soft name))))
+
+(ert-deftest clatter-test-feed-hide-nil-stamps-atom-but-shows ()
   "Every captured line carries a hide atom even when nothing is hidden."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "hello" nil)
-    (let* ((buf (clatter-test-unified--buffer))
-           (bol (clatter-test-unified--line-bol buf "hello"))
-           (atom (clatter-unified--hide-atom "testnet" "#emacs")))
+    (let* ((buf (clatter-test-feed--buffer))
+           (bol (clatter-test-feed--line-bol buf "hello"))
+           (atom (clatter-feed--hide-atom "testnet" "#emacs")))
       (should bol)
       (with-current-buffer buf
         (should (memq atom (ensure-list (get-text-property bol 'invisible))))
         (should-not (invisible-p bol))))))
 
-(ert-deftest clatter-test-unified-hide-list-hides-matching-target ()
+(ert-deftest clatter-test-feed-hide-list-hides-matching-target ()
   "A hide list conceals matching targets and unhides when cleared."
-  (let ((clatter-unified-hide-channels '("#EMACS")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (let ((clatter-feed-hide-channels '("#EMACS")))
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "hidden" nil)
-      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#other"
+      (clatter-feed--on-privmsg conn '("bob" "user" "host") "#other"
                                    "shown" nil)
-      (let* ((buf (clatter-test-unified--buffer))
-             (hidden (clatter-test-unified--line-bol buf "hidden"))
-             (shown (clatter-test-unified--line-bol buf "shown")))
+      (let* ((buf (clatter-test-feed--buffer))
+             (hidden (clatter-test-feed--line-bol buf "hidden"))
+             (shown (clatter-test-feed--line-bol buf "shown")))
         (with-current-buffer buf
           (should (invisible-p hidden))
           (should-not (invisible-p shown)))
-        (setq clatter-unified-hide-channels nil)
-        (clatter-unified--reconcile-hide)
+        (setq clatter-feed-hide-channels nil)
+        (clatter-feed--reconcile-hide)
         (with-current-buffer buf
           (should-not (invisible-p hidden))
           (should-not (invisible-p shown)))))))
 
-(ert-deftest clatter-test-unified-hide-list-still-updates-last-source ()
+(ert-deftest clatter-test-feed-hide-list-still-updates-last-source ()
   "Source-hide is temporary, so a hidden run still owns separator context."
-  (let ((clatter-unified-hide-channels '("#emacs")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (let ((clatter-feed-hide-channels '("#emacs")))
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "one" nil)
-      (clatter-unified--on-privmsg conn '("bob" "user" "host") "#emacs"
+      (clatter-feed--on-privmsg conn '("bob" "user" "host") "#emacs"
                                    "two" nil)
-      (should (= 1 (clatter-test-unified--count
-                    (clatter-test-unified--buffer)
+      (should (= 1 (clatter-test-feed--count
+                    (clatter-test-feed--buffer)
                     "──[^\n]*testnet/#emacs"))))))
 
-(ert-deftest clatter-test-unified-hide-list-hides-separator ()
+(ert-deftest clatter-test-feed-hide-list-hides-separator ()
   "A hidden source's separator shares the hide atom."
-  (let ((clatter-unified-hide-channels '("#emacs")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (let ((clatter-feed-hide-channels '("#emacs")))
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "x" nil)
-      (let ((buf (clatter-test-unified--buffer)))
+      (let ((buf (clatter-test-feed--buffer)))
         (with-current-buffer buf
           (goto-char (point-min))
           (re-search-forward "──[^\n]*testnet/#emacs")
           (should (invisible-p (match-beginning 0))))))))
 
-(ert-deftest clatter-test-unified-hide-visible-follows-windows ()
+(ert-deftest clatter-test-feed-hide-visible-follows-windows ()
   "Visible mode hides a source while it has a window, then shows it again."
-  (let ((clatter-unified-hide-visible t))
-    (clatter-test-unified--with-capture conn
+  (let ((clatter-feed-hide-visible t))
+    (clatter-test-feed--with-capture conn
       (let ((chan (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
             (scratch (get-buffer-create " *clatter-hide-scratch*")))
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      "here" nil)
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#other"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#other"
                                      "away" nil)
-        (let* ((buf (clatter-test-unified--buffer))
-               (here (clatter-test-unified--line-bol buf "here"))
-               (away (clatter-test-unified--line-bol buf "away")))
+        (let* ((buf (clatter-test-feed--buffer))
+               (here (clatter-test-feed--line-bol buf "here"))
+               (away (clatter-test-feed--line-bol buf "away")))
           (save-window-excursion
             (delete-other-windows)
             (set-window-buffer (selected-window) chan)
-            (clatter-unified--reconcile-hide)
+            (clatter-feed--reconcile-hide)
             (with-current-buffer buf
               (should (invisible-p here))
               (should-not (invisible-p away)))
             (set-window-buffer (selected-window) scratch)
-            (clatter-unified--reconcile-hide)
+            (clatter-feed--reconcile-hide)
             (with-current-buffer buf
               (should-not (invisible-p here))))
           (when (buffer-live-p scratch)
             (kill-buffer scratch)))))))
 
-(ert-deftest clatter-test-unified-hide-visible-and-channels-combine ()
+(ert-deftest clatter-test-feed-hide-visible-and-channels-combine ()
   "On-screen sources and the denylist hide together."
-  (let ((clatter-unified-hide-visible t)
-        (clatter-unified-hide-channels '("#other")))
-    (clatter-test-unified--with-capture conn
+  (let ((clatter-feed-hide-visible t)
+        (clatter-feed-hide-channels '("#other")))
+    (clatter-test-feed--with-capture conn
       (let ((chan (clatter-get-or-create-buffer "testnet" "#emacs" 'channel))
             (scratch (get-buffer-create " *clatter-hide-scratch*")))
-        (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+        (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                      "here" nil)
-        (clatter-unified--on-privmsg conn '("bob" "user" "host") "#other"
+        (clatter-feed--on-privmsg conn '("bob" "user" "host") "#other"
                                      "listed" nil)
-        (clatter-unified--on-privmsg conn '("carol" "user" "host") "#keep"
+        (clatter-feed--on-privmsg conn '("carol" "user" "host") "#keep"
                                      "shown" nil)
-        (let* ((buf (clatter-test-unified--buffer))
-               (here (clatter-test-unified--line-bol buf "here"))
-               (listed (clatter-test-unified--line-bol buf "listed"))
-               (shown (clatter-test-unified--line-bol buf "shown")))
+        (let* ((buf (clatter-test-feed--buffer))
+               (here (clatter-test-feed--line-bol buf "here"))
+               (listed (clatter-test-feed--line-bol buf "listed"))
+               (shown (clatter-test-feed--line-bol buf "shown")))
           (save-window-excursion
             (delete-other-windows)
             (set-window-buffer (selected-window) chan)
-            (clatter-unified--reconcile-hide)
+            (clatter-feed--reconcile-hide)
             (with-current-buffer buf
               (should (invisible-p here))
               (should (invisible-p listed))
@@ -694,60 +702,60 @@ at the top of the source buffer, not the bottom."
           (when (buffer-live-p scratch)
             (kill-buffer scratch)))))))
 
-(ert-deftest clatter-test-unified-disable-clears-hide-atoms ()
+(ert-deftest clatter-test-feed-disable-clears-hide-atoms ()
   "Disabling capture unhides retained lines."
-  (let ((clatter-unified-hide-channels '("#emacs")))
-    (clatter-test-unified--with-capture conn
-      (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (let ((clatter-feed-hide-channels '("#emacs")))
+    (clatter-test-feed--with-capture conn
+      (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                    "x" nil)
-      (let* ((buf (clatter-test-unified--buffer))
-             (bol (clatter-test-unified--line-bol buf "x")))
+      (let* ((buf (clatter-test-feed--buffer))
+             (bol (clatter-test-feed--line-bol buf "x")))
         (with-current-buffer buf
           (should (invisible-p bol)))
-        (clatter-unified-disable)
+        (clatter-feed-disable)
         (with-current-buffer buf
           (should-not (invisible-p bol)))))))
 
-(ert-deftest clatter-test-unified-hide-list-covers-disconnected-sources ()
+(ert-deftest clatter-test-feed-hide-list-covers-disconnected-sources ()
   "A hide list still conceals inbox lines after the connection is gone."
-  (clatter-test-unified--with-capture conn
-    (clatter-unified--on-privmsg conn '("alice" "user" "host") "#emacs"
+  (clatter-test-feed--with-capture conn
+    (clatter-feed--on-privmsg conn '("alice" "user" "host") "#emacs"
                                  "old" nil)
-    (let* ((buf (clatter-test-unified--buffer))
-           (bol (clatter-test-unified--line-bol buf "old"))
-           (clatter-unified-hide-channels '("#emacs")))
+    (let* ((buf (clatter-test-feed--buffer))
+           (bol (clatter-test-feed--line-bol buf "old"))
+           (clatter-feed-hide-channels '("#emacs")))
       (clrhash clatter-connections)
-      (clatter-unified--reconcile-hide)
+      (clatter-feed--reconcile-hide)
       (with-current-buffer buf
         (should (invisible-p bol))))))
 
-(ert-deftest clatter-test-unified-hide-visible-hook-waits-for-enable ()
+(ert-deftest clatter-test-feed-hide-visible-hook-waits-for-enable ()
   "Customizing hide to visible does not install the window hook until enable."
   (unwind-protect
       (progn
-        (clatter-unified-disable)
-        (clatter-unified--set-hide 'clatter-unified-hide-visible t)
-        (should-not (memq #'clatter-unified--window-change
+        (clatter-feed-disable)
+        (clatter-feed--set-hide 'clatter-feed-hide-visible t)
+        (should-not (memq #'clatter-feed--window-change
                           (default-value 'window-buffer-change-functions)))
-        (clatter-unified-enable)
-        (should (memq #'clatter-unified--window-change
+        (clatter-feed-enable)
+        (should (memq #'clatter-feed--window-change
                       (default-value 'window-buffer-change-functions))))
-    (clatter-unified-disable)
-    (clatter-unified--set-hide 'clatter-unified-hide-visible nil)))
+    (clatter-feed-disable)
+    (clatter-feed--set-hide 'clatter-feed-hide-visible nil)))
 
-(ert-deftest clatter-test-unified-hide-visible-registers-hook ()
+(ert-deftest clatter-test-feed-hide-visible-registers-hook ()
   "Visible mode installs the window hook; disable removes it."
-  (let ((clatter-unified-hide-visible t))
+  (let ((clatter-feed-hide-visible t))
     (unwind-protect
         (progn
-          (clatter-unified-enable)
-          (should (memq #'clatter-unified--window-change
+          (clatter-feed-enable)
+          (should (memq #'clatter-feed--window-change
                         (default-value 'window-buffer-change-functions)))
-          (clatter-unified-disable)
-          (should-not (memq #'clatter-unified--window-change
+          (clatter-feed-disable)
+          (should-not (memq #'clatter-feed--window-change
                             (default-value 'window-buffer-change-functions))))
-      (clatter-unified-disable))))
+      (clatter-feed-disable))))
 
-(provide 'test-unified)
+(provide 'test-feed)
 
-;;; test-unified.el ends here
+;;; test-feed.el ends here

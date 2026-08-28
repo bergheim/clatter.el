@@ -970,9 +970,9 @@ for nicks and a description for commands.
 
 Toggle with =M-x clatter-nicklist-toggle=. An open list follows the selected channel.
 
-** Unified buffer
+** Feed buffer
 
-=*clatter-unified*= is a single chronological inbox showing live traffic from
+=*clatter-feed*= is a single chronological inbox showing live traffic from
 every channel and query across all networks, rendered like a normal chat
 buffer: sender colors, mentions, nick-column grouping, mIRC formatting and
 timestamps all behave the same. (Nicks inside message text are not
@@ -981,19 +981,19 @@ none of.)
 
 | Variable                    | Default | Description                             |
 |-----------------------------+---------+-----------------------------------------|
-| =clatter-unified-enabled=     | =nil=     | Capture live messages into the inbox    |
-| =clatter-unified-autoscroll=  | =t=       | Follow new messages when at the bottom  |
-| =clatter-unified-hide-visible=  | =nil=     | Hide sources that currently have a window |
-| =clatter-unified-hide-channels= | =nil=     | Hide these channel/query names (all nets) |
+| =clatter-feed-enabled=     | =nil=     | Capture live messages into the inbox    |
+| =clatter-feed-autoscroll=  | =t=       | Follow new messages when at the bottom  |
+| =clatter-feed-hide-visible=  | =nil=     | Hide sources that currently have a window |
+| =clatter-feed-hide-channels= | =nil=     | Hide these channel/query names (all nets) |
 
 Set it before calling =clatter-setup=, which is what installs the capture hooks:
 
 #+begin_src emacs-lisp
-(setopt clatter-unified-enabled t)
+(setopt clatter-feed-enabled t)
 (clatter-setup)
 #+end_src
 
-Open the buffer with =M-x clatter-unified=. It is created on first use —
+Open the buffer with =M-x clatter-feed=. It is created on first use —
 by the first captured message, or by the command itself.
 
 | Key   | Action                                 |
@@ -1015,8 +1015,8 @@ Behavior notes:
   collapses into a single nick column within its own channel run.
 - Muted senders and fools are hidden exactly as they are in channel buffers,
   and =clatter-toggle-fools= reveals them here too.
-- =clatter-unified-hide-visible= collapses sources you are already looking at.
-  =clatter-unified-hide-channels= is a denylist of channel/query names. Both can
+- =clatter-feed-hide-visible= collapses sources you are already looking at.
+  =clatter-feed-hide-channels= is a denylist of channel/query names. Both can
   be on at once. Set them with =setopt= — their setters resync the buffer; plain
   =setq= does not. The text stays hidden, not deleted, so it comes back.
 - The buffer is read-only and has no prompt: it is for reading and jumping,
@@ -1117,7 +1117,7 @@ explicit call from your configuration.
 | =clatter-smart.el=         | Adaptive noise filtering                      | =clatter-smart-enabled= (on)          |
 | =clatter-pals.el=          | Pals, fools and visibility                    | =clatter-pals= / =clatter-fools=        |
 | =clatter-nicklist.el=      | Channel member sidebar                        | =clatter-nicklist-toggle=             |
-| =clatter-unified.el=       | Cross-network unified inbox buffer            | =clatter-unified-enabled= (off)       |
+| =clatter-feed.el=       | Cross-network feed inbox buffer            | =clatter-feed-enabled= (off)       |
 | =clatter-evil.el=          | Evil bindings for the special buffers         | automatic when evil is loaded         |
 | =clatter-list.el=          | Channel list browser                          | =/list=                               |
 | =clatter-track.el=         | Mode-line activity tracking                   | =clatter-track-enabled= (on)          |
