@@ -195,12 +195,30 @@ can notify you without disrupting the current window.  `buffer' uses
   :group 'clatter)
 
 (defcustom clatter-timestamp-side 'right
-  "Side of the window where message timestamps are displayed.
-The value `left' uses the left margin, `right' uses the right margin,
-and nil disables margin timestamps."
+  "Where message timestamps are displayed.
+`left' and `right' use a window margin.  `inline' right-aligns an overlay
+at the end of the message line with no reserved margin.  `divider'
+inserts a minute row before any line a margin would stamp when the
+clock bucket changes; the row hides and shows with the line that
+opened it, and two rows are never adjacent.  A new buffer opens with a
+divider at its creation time, so a quiet buffer still shows when it
+started.  nil disables timestamps."
   :type '(choice (const :tag "Left margin" left)
                  (const :tag "Right margin" right)
+                 (const :tag "Right-aligned overlay" inline)
+                 (const :tag "Minute divider row" divider)
                  (const :tag "Disabled" nil))
+  :group 'clatter)
+
+(defcustom clatter-timestamp-interval 1
+  "Minutes between time marks, for every `clatter-timestamp-side'.
+A new mark appears only when this many minutes have ticked on the
+clock since the last one in that buffer: `divider' opens rows this
+often, and the margin and `inline' sides coalesce their stamps to the
+same buckets when `clatter-timestamp-only-if-changed' is non-nil.
+At 1, marks follow the formatted timestamp value.  Values below 1 are
+treated as 1."
+  :type 'integer
   :group 'clatter)
 
 (defcustom clatter-self-echo-mode 'server
@@ -528,10 +546,10 @@ per-target buffers created by clatter.  Possible values:
            the network qualifier.
   channel  `TARGET' (for example `#foo'): use only the target name,
            with no `clatter:'/network prefix and no surrounding
-           asterisks.  Reads as a bare channel or nick name, but
-           note that the same channel or nick on two networks would
-           collide into one buffer name; prefer this only when you
-           connect to a single network."
+           asterisks.  Server buffers remain network-qualified because
+           every network uses the `*server*' target.  The same channel
+           or nick on two networks can still collide; prefer this style
+           only when those targets are unique."
   :type '(choice (const :tag "*clatter:NETWORK/TARGET*" full)
                  (const :tag "*NETWORK/TARGET*" network)
                  (const :tag "TARGET (e.g. #foo)" channel))

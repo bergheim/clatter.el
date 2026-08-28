@@ -29,7 +29,9 @@ Server buffers use TARGET \"*server*\".  The format is governed by
 `clatter-buffer-name-style'."
   (pcase clatter-buffer-name-style
     ('network (format "*%s/%s*" network target))
-    ('channel target)
+    ('channel (if (string= target "*server*")
+                  (format "*%s/%s*" network target)
+                target))
     (_ (format "*clatter:%s/%s*" network target))))
 
 (defun clatter-server-buffer-name (network)

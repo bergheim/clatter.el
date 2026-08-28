@@ -26,8 +26,10 @@
 
 ;; --- Faces ---
 
-(defvar-local clatter--last-formatted-timestamp nil
-  "Last formatted message timestamp in the current Clatter buffer.")
+(defvar-local clatter--last-timestamp-key nil
+  "Coalescing key of the last timestamped message in this buffer.
+The bucket key from `clatter--timestamp-bucket-key', shared by every
+timestamp side.")
 
 ;; Clatter faces inherit from standard theme faces (font-lock-*,
 ;; error, success) rather than hardcoding hex colors, so they stay legible
@@ -36,6 +38,11 @@
 (defface clatter-timestamp
   '((t :inherit font-lock-doc-face))
   "Face for message timestamps."
+  :group 'clatter)
+
+(defface clatter-divider
+  '((t :inherit shadow))
+  "Face for divider rows."
   :group 'clatter)
 
 (defface clatter-nick
@@ -671,6 +678,14 @@ approach in `erc-update-undo-list'."
             (setcdr cons (+ (cdr cons) shift)))))
         (setq list (cdr list))))))
 
+(defun clatter--body-width (&optional buffer)
+  "Return the body width of a window showing BUFFER, else the frame width.
+The frame fallback keeps headless and temp-buffer contexts working."
+  (if-let* ((win (car (get-buffer-window-list (or buffer (current-buffer))
+                                              nil 'visible))))
+      (window-body-width win)
+    (frame-width)))
+
 (defun clatter--effective-fill-column (&optional buffer)
   "Return the column at which to hard-wrap inserted message text.
 When `clatter-fill-column' is an integer, return it.  When it is the
@@ -686,12 +701,132 @@ column is too narrow to wrap past the nick indent."
     (pcase clatter-fill-column
       ('nil nil)
       ('auto
-       (let* ((buf (or buffer (current-buffer)))
-              (win (car (get-buffer-window-list buf nil 'visible)))
-              (raw (if win (window-body-width win) (frame-width)))
-              (col (min raw (or clatter-max-line-length 400))))
+       (let ((col (min (clatter--body-width buffer)
+                       (or clatter-max-line-length 400))))
          (when (> col floor-col) col)))
       (col (when (and (integerp col) (> col floor-col)) col)))))
+
+(defun clatter--timestamp-margin-p ()
+  "Return non-nil when timestamps use a window margin."
+  (memq clatter-timestamp-side '(left right)))
+
+(defun clatter--timestamp-overlay-p ()
+  "Return non-nil when timestamps use a per-message overlay."
+  (memq clatter-timestamp-side '(left right inline)))
+
+;; `:align-to' runs before word-wrap, so leftover space on the last
+;; visual row can't be used.  Decided at insert time — stale after a
+;; window resize until the line is rewritten.
+(defun clatter--timestamp-inline-break-p (eol ts-str)
+  "Return non-nil when the line ending at EOL leaves no room for TS-STR."
+  (save-excursion
+    (goto-char eol)
+    (> (current-column)
+       (- (clatter--body-width) (string-width ts-str) 1))))
+
+(defun clatter--timestamp-overlay-apply (ov ts-str &optional tooltip)
+  "Attach the timestamp string for TS-STR to OV for the current side.
+TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
+  (let ((stamp (propertize ts-str
+                           'face '(clatter-timestamp default)
+                           'help-echo tooltip)))
+    (overlay-put ov 'help-echo tooltip)
+    (if (eq clatter-timestamp-side 'inline)
+        ;; Stamp sits on the message's last row; one that doesn't fit is
+        ;; dropped.  No fresh-row fallback: an overlay-string row has no
+        ;; buffer position of its own, so point can't land on it and
+        ;; vertical motion gets trapped.  Keep the raw stamp on the
+        ;; overlay so `clatter--timestamp-inline-refresh-at' can re-fit.
+        (progn
+          (overlay-put ov 'clatter-timestamp-str ts-str)
+          (overlay-put ov 'clatter-timestamp-tooltip tooltip)
+          (overlay-put ov 'before-string
+                       (unless (clatter--timestamp-inline-break-p
+                                (overlay-start ov) ts-str)
+                         (concat (propertize
+                                  " " 'display
+                                  `(space :align-to
+                                     (- right ,(string-width ts-str))))
+                                 stamp))))
+      ;; Apply 'default face after 'clatter-timestamp so no unwanted face
+      ;; properties are inherited from text which might be at point.
+      (overlay-put ov 'before-string
+                   (propertize " " 'display
+                               `((margin ,(if (eq clatter-timestamp-side 'left)
+                                              'left-margin
+                                            'right-margin))
+                                 ,stamp))))))
+
+(defun clatter--timestamp-inline-refresh-at (eol)
+  "Re-fit the inline stamp on the line ending at EOL.
+Compact system groups change a line after its stamp's fit was decided —
+appends lengthen it, visibility toggles change its displayed width — so
+apply the stamp again: the fit check drops or restores it, the same
+rule as at insert time."
+  (when (eq clatter-timestamp-side 'inline)
+    (dolist (ov (overlays-at eol))
+      (when (overlay-get ov 'clatter-timestamp)
+        (when-let* ((ts-str (overlay-get ov 'clatter-timestamp-str)))
+          (clatter--timestamp-overlay-apply
+           ov ts-str (overlay-get ov 'clatter-timestamp-tooltip)))))))
+
+(defun clatter--timestamp-bucket-key (time)
+  "Return the coalescing key for TIME, shared by every timestamp side.
+At `clatter-timestamp-interval' 1 this is the formatted timestamp, so
+marks follow the displayed value.  Above 1, minutes are floored to the
+interval: a value of 10 yields one mark per ten-minute clock bucket."
+  (if (<= clatter-timestamp-interval 1)
+      (format-time-string clatter-timestamp-format time)
+    (let* ((dec (decode-time time))
+           (minute (+ (* 60 (decoded-time-hour dec))
+                      (decoded-time-minute dec))))
+      (setf (decoded-time-second dec) 0
+            (decoded-time-hour dec) 0
+            (decoded-time-minute dec)
+            (* clatter-timestamp-interval
+               (/ minute clatter-timestamp-interval)))
+      (format-time-string clatter-timestamp-format (encode-time dec)))))
+
+(defun clatter--timestamp-divider-insert-row (formatted tooltip line-props
+                                                        &optional invisible)
+  "Insert a minute-divider row for FORMATTED time at point.
+TOOLTIP becomes the row's help-echo; LINE-PROPS cover the whole row.
+INVISIBLE carries the opening line's categories, so the row hides and
+shows with the line that opened it, like a margin stamp would."
+  (let ((start (point)))
+    (insert (propertize (format "— %s —" formatted)
+                        'face 'clatter-timestamp
+                        'clatter-timestamp-divider t
+                        'help-echo tooltip)
+            "\n")
+    (add-text-properties start (point) line-props)
+    (put-text-property start (point) 'invisible invisible)))
+
+(defun clatter--timestamp-divider-seed (buffer)
+  "Insert an opening minute-divider row in BUFFER at the current time.
+Without it a quiet buffer shows no time at all until the first spoken
+message.  Seeds `clatter--last-timestamp-key' so a message arriving in
+the same bucket does not open a second, adjacent row."
+  (when (and (eq clatter-timestamp-side 'divider)
+             clatter-timestamp-format)
+    (with-current-buffer buffer
+      (let* ((inhibit-read-only t)
+             (buffer-undo-list t)
+             (time (current-time))
+             (formatted (format-time-string clatter-timestamp-format time))
+             (tooltip (and clatter-timestamp-tooltip-format
+                           (format-time-string
+                            clatter-timestamp-tooltip-format time))))
+        (save-excursion
+          (goto-char (clatter--message-insert-position))
+          (clatter--timestamp-divider-insert-row
+           formatted tooltip
+           (list 'read-only t
+                 'front-sticky t
+                 'wrap-prefix (make-string (1+ clatter-nick-column-width) ?\s)
+                 'line-prefix "")))
+        (setq clatter--last-timestamp-key
+              (clatter--timestamp-bucket-key time))))))
 
 (defun clatter--insert-message (buffer text &optional no-timestamp msg-props time invisible message-line-spacing)
   "Insert formatted TEXT into BUFFER.
@@ -718,23 +853,40 @@ append at the bottom like a traditional IRC client."
             (let* ((formatted-timestamp
                     (unless no-timestamp
                       (format-time-string clatter-timestamp-format time)))
+                   (ts-key (and formatted-timestamp
+                                (clatter--timestamp-bucket-key time)))
+                   (ts-changed-p
+                    (not (equal ts-key clatter--last-timestamp-key)))
                    (ts-str (and formatted-timestamp
+                                (clatter--timestamp-overlay-p)
                                 (or (not clatter-timestamp-only-if-changed)
-                                    (not (equal formatted-timestamp
-                                                clatter--last-formatted-timestamp)))
+                                    ts-changed-p)
                                 formatted-timestamp))
                    (ts-tooltip-str
-                    (unless no-timestamp
-                      (when clatter-timestamp-tooltip-format
-                        (format-time-string clatter-timestamp-tooltip-format time))))
+                    (and (not no-timestamp)
+                         clatter-timestamp-tooltip-format
+                         (format-time-string clatter-timestamp-tooltip-format time)))
                    (wrap-col (1+ clatter-nick-column-width))
                    (wrap-prefix (make-string wrap-col ?\s))
-                   (start (point)))
-              ;; Remember the formatted value, rather than the raw time, so
-              ;; formats without seconds coalesce correctly and each buffer
-              ;; keeps its own timestamp run.
-              (when formatted-timestamp
-                (setq clatter--last-formatted-timestamp formatted-timestamp))
+                   (line-props (list 'read-only t
+                                     'front-sticky t
+                                     'wrap-prefix wrap-prefix
+                                     'line-prefix ""))
+                   start)
+              (when ts-key
+                (setq clatter--last-timestamp-key ts-key))
+              (when (and (eq clatter-timestamp-side 'divider)
+                         ts-key ts-changed-p)
+                (clatter--timestamp-divider-insert-row
+                 formatted-timestamp ts-tooltip-str line-props invisible))
+              ;; Newest-first inserts stay below their existing bucket row.
+              (when (and (eq clatter-timestamp-side 'divider)
+                         ts-key (not ts-changed-p)
+                         (eq clatter-message-order 'newest-first)
+                         (get-text-property (point)
+                                            'clatter-timestamp-divider))
+                (forward-line 1))
+              (setq start (point))
               (insert text "\n")
               (when message-line-spacing
                 (put-text-property (1- (point)) (point)
@@ -746,26 +898,15 @@ append at the bottom like a traditional IRC client."
                         (adaptive-fill-mode nil))
                     (fill-region start (1- (point))))))
               (when ts-str
-                (let ((ov (make-overlay start (1+ start) nil t)))
-                  (when clatter-timestamp-side
-                    (overlay-put ov 'before-string
-                                 ;; Apply 'default face after 'clatter-timestamp to ensure that no
-                                 ;; unwanted face properties are inherited from text which might be
-                                 ;; at point.
-                                 (propertize " " 'display
-                                             `((margin ,(if (eq clatter-timestamp-side 'left)
-                                                            'left-margin
-                                                          'right-margin))
-                                               ,(propertize ts-str
-                                                            'face '(clatter-timestamp default)
-                                                            'help-echo ts-tooltip-str)))))
+                (let ((ov (if (eq clatter-timestamp-side 'inline)
+                              ;; Covers the final newline; rear stays put so
+                              ;; a message inserted below can't extend it.
+                              (make-overlay (1- (point)) (point) nil t)
+                            (make-overlay start (1+ start) nil t))))
+                  (clatter--timestamp-overlay-apply ov ts-str ts-tooltip-str)
                   (overlay-put ov 'clatter-timestamp t)
                   (overlay-put ov 'invisible invisible)))
-              (add-text-properties start (point)
-                                   (list 'read-only t
-                                         'front-sticky t
-                                         'wrap-prefix wrap-prefix
-                                         'line-prefix ""))
+              (add-text-properties start (point) line-props)
               (when msg-props
                 (add-text-properties start (point) msg-props))
               (when (clatter--fool-invisibility-p invisible)
@@ -1160,17 +1301,15 @@ identical messages sent close together each reconcile only one local line."
                                            'clatter-text text))
                 (when msgid
                   (put-text-property start end 'clatter-msgid msgid))
-                (when server-time
-                  (dolist (overlay (overlays-at start))
+                (when (and server-time (clatter--timestamp-overlay-p))
+                  (dolist (overlay (overlays-in start end))
                     (when (overlay-get overlay 'clatter-timestamp)
-                      (overlay-put overlay 'before-string
-                                   (propertize " " 'display
-                                               `((margin ,(if (eq clatter-timestamp-side 'left)
-                                                              'left-margin
-                                                            'right-margin))
-                                                 ,(propertize
-                                                   (format-time-string clatter-timestamp-format server-time)
-                                                   'face '(clatter-timestamp default))))))))
+                      (clatter--timestamp-overlay-apply
+                       overlay
+                       (format-time-string clatter-timestamp-format server-time)
+                       (and clatter-timestamp-tooltip-format
+                            (format-time-string
+                             clatter-timestamp-tooltip-format server-time))))))
                 ;; Do not consume a pending record unless its tentative line
                 ;; still exists.  Buffer truncation may have removed it, in
                 ;; which case the caller must insert the server echo normally.
@@ -1369,7 +1508,9 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
             (when any-visible
               (remove-text-properties group-start first-event-start
                                       '(display nil))))
-          (dolist (overlay (overlays-at group-start))
+          (dolist (overlay (append (overlays-at group-start)
+                                   (and newline-position
+                                        (overlays-at newline-position))))
             (when (overlay-get overlay 'clatter-timestamp)
               (overlay-put
                overlay 'invisible
@@ -1386,6 +1527,8 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
                newline-position group-end 'invisible
                (and first-event-start
                     (get-text-property first-event-start 'invisible)))))
+          (when newline-position
+            (clatter--timestamp-inline-refresh-at newline-position))
           (setq position group-end)))
       (clatter--refresh-input-spacers (current-buffer)))))
 
@@ -1488,7 +1631,8 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
                            'wrap-prefix
                            (make-string (1+ clatter-nick-column-width) ?\s)
                            'line-prefix ""))
-                    (set-marker tail (point))))
+                    (set-marker tail (point))
+                    (clatter--timestamp-inline-refresh-at (point))))
                 (when (and pre-input clatter--input-marker)
                   (clatter--update-undo-list
                    (- (marker-position clatter--input-marker) pre-input)))
@@ -1525,7 +1669,8 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
                 (put-text-property end (min (1+ end) (point-max))
                                    'invisible
                                    (clatter--compact-system-visibility invisible))
-                (dolist (overlay (overlays-at start))
+                (dolist (overlay (append (overlays-at start)
+                                         (overlays-at end)))
                   (when (overlay-get overlay 'clatter-timestamp)
                     (overlay-put overlay 'invisible invisible)
                     (overlay-put overlay 'clatter-compact-system-invisible
@@ -2076,6 +2221,7 @@ connected (the common case) or absent."
     (add-hook 'visible-mode-hook
               #'clatter--refresh-compact-system-layout nil t)
     (clatter--setup-prompt buffer)
+    (clatter--timestamp-divider-seed buffer)
     ;; Add mode-line.  Optionally include the activity crumbs (see
     ;; `clatter-track-show-in-clatter-buffers') so they are visible while
     ;; inside a clatter buffer, not just in the global mode line.
@@ -2545,10 +2691,10 @@ server buffer otherwise (e.g. the connect-time MOTD)."
                   (clatter-get-server-buffer network)
                   (clatter-get-or-create-buffer network "*server*" 'server))))
     (clatter-ui-setup-buffer-if-needed buf)
-    (clatter-insert-system buf "--- MOTD ---")
+    (clatter--insert-message buf (clatter--divider "MOTD") t)
     (dolist (line lines)
       (clatter-insert-system buf (clatter-hl-urls-in-string (clatter-format-parse line)) nil))
-    (clatter-insert-system buf "--- End of MOTD ---")))
+    (clatter--insert-message buf (clatter--divider "End of MOTD") t)))
 
 (defun clatter-ui--on-whois (conn nick data)
   "Handle WHOIS reply for UI: display NICK info from DATA.
@@ -2693,6 +2839,19 @@ otherwise (the process filter may run in any buffer, so don't rely on
                 (add-text-properties found (1+ found)
                                      (list 'clatter-reactions new-reactions))))))))))
 
+(defun clatter--divider (label)
+  "Return a window-wide divider line with LABEL centered.
+The left rule is a stretch glyph; the right rule uses an extending face.
+Redisplay recenters and resizes the bar with each window, without
+width calculations, overlays, or resize hooks."
+  (let ((rule '(:inherit clatter-divider :strike-through t :extend t))
+        (label (concat " " label " ")))
+    (concat
+     (propertize " " 'face rule
+                 'display `(space :align-to (- center ,(/ (string-width label) 2))))
+     (propertize label 'face 'clatter-divider)
+     (propertize " " 'face rule))))
+
 (defun clatter-ui--on-batch-complete (conn _batch-type target messages)
   "Handle completed batch: render MESSAGES for TARGET on CONN.
 Renders a visual separator before and after history playback.
@@ -2713,15 +2872,9 @@ on screen, so it renders at the buffer's oldest end, in the direction
              ;; end separator, then messages newest-first, then the start
              ;; separator.
              (messages (if backlog (reverse messages) messages))
-             (sep-text (propertize
-                        (concat " " (make-string 30 ?-) " history "
-                                (make-string 30 ?-) " ")
-                        'face 'font-lock-doc-face))
-             (end-sep-text (propertize (format " %s end of history (%d messages) %s "
-                                               (make-string 20 ?-)
-                                               count
-                                               (make-string 20 ?-))
-                                       'face 'font-lock-doc-face)))
+             (sep-text (clatter--divider "history"))
+             (end-sep-text (clatter--divider
+                            (format "end of history (%d messages)" count))))
         (clatter--insert-message buf (if backlog end-sep-text sep-text) t)
         ;; Insert each message with dimmed style.  Suppress inline image
         ;; scanning/fetching for history playback: a large backlog would
@@ -2850,85 +3003,85 @@ COMMAND is the numeric reply code, PARAMS its parameters on CONN."
         (clatter-insert-system
          query-buf (format "[%s] %s" command (string-join (cdr params) " ")))
         (cl-return-from clatter-ui--on-numeric)))
-  (pcase command
-    ;; --- Informational numerics ---
-    ((or "001" "002" "003" "004" "242" "251" "252" "253" "254" "255"
-         "265" "266")
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network)))
-       (when buf
-         (clatter-insert-system buf (string-join (cdr params) " ")))))
-    ((or "305" "306") ;  RPL_UNAWAY, RPL_NOWAWAY
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network))
-            (msg (string-join (cdr params) " ")))
-       (when buf
-         (clatter-insert-system buf msg))
-       (dolist (buf (clatter-channel-buffers network))
-         (clatter-insert-system buf msg)))
-     (when (clatter--prompt-format-needs-away-p)
-       (clatter--refresh-prompt)))
-    ;; --- MODE numerics ---
-    ("221"   ; RPL_UMODEIS
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network))
-            (nick (nth 0 params))
-            (modes (nth 1 params)))
-       (when buf
-         (clatter-insert-system buf (format "%s is %s" nick modes)))))
-    ("324"   ; RPL_CHANNELMODEIS
-     (let* ((network (clatter-connection-network-id conn))
-            (channel (nth 1 params))
-            (buf (clatter-get-buffer network channel))
-            (modes (nth 2 params)))
-       (when buf
-         (clatter-set-channel-modes buf modes)
-         (clatter-insert-system buf (format "%s is %s" channel modes)))))
-    ("329"   ; RPL_CREATIONTIME
-     (let* ((network (clatter-connection-network-id conn))
-            (channel (nth 1 params))
-            (buf (clatter-get-buffer network channel))
-            (ctime (string-to-number (nth 2 params))))
-       (when buf
-         (clatter-insert-system
-          buf (format "%s was created at %s"
-                      channel (format-time-string "%F %T" ctime))))))
-    ((or "401" "403"  ; ERR_NOSUCHNICK, ERR_NOSUCHCHANNEL
-         "404"        ; ERR_CANNOTSENDTOCHAN
-         "475")       ; ERR_BADCHANNELKEY
-     ;; Route to the buffer named by the reply's target param (a query
-     ;; buffer for 401's nick, a channel buffer for the others), falling
-     ;; back to the server buffer.  Do not use (current-buffer): the
-     ;; process filter may run in any buffer.
-     (let* ((network (clatter-connection-network-id conn))
-            (target (nth 1 params))
-            (buf (or (clatter-get-buffer network target)
-                     (clatter-get-server-buffer network))))
-       (when buf
-         (clatter-insert-system buf (string-join (reverse (cdr params)) " ")))))
-    ("421"                            ; ERR_UNKNOWNCOMMAND
-     ;; The server rejected a command we sent.  If it was TAGMSG, the
-     ;; server (or an upstream behind a bouncer/bridge) ACKed message-tags
-     ;; but does not actually accept TAGMSG; remember that so outbound
-     ;; typing/reaction TAGMSGs stop rather than spamming 421s every
-     ;; keystroke.  Still display the error so the user sees it once.
-     (let ((rejected-cmd (nth 1 params)))
-       (when (string-equal (and rejected-cmd (upcase rejected-cmd)) "TAGMSG")
-         (setf (clatter-connection-tagmsg-rejected conn) t)))
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network)))
-       (when buf
-         (clatter-insert-system
-          buf (format "[%s] %s" command (string-join (cdr params) " "))))))
-    ;; Catch-all: show any unhandled numeric (e.g. 421 ERR_UNKNOWNCOMMAND,
-    ;; 411/412/432/433/461/471-477 ...) in the server buffer instead of
-    ;; silently dropping it.
-    (_
-     (let* ((network (clatter-connection-network-id conn))
-            (buf (clatter-get-server-buffer network)))
-       (when buf
-         (clatter-insert-system
-          buf (format "[%s] %s" command (string-join (cdr params) " "))))))))
+    (pcase command
+      ;; --- Informational numerics ---
+      ((or "001" "002" "003" "004" "242" "251" "252" "253" "254" "255"
+           "265" "266")
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network)))
+         (when buf
+           (clatter-insert-system buf (string-join (cdr params) " ")))))
+      ((or "305" "306") ;  RPL_UNAWAY, RPL_NOWAWAY
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network))
+              (msg (string-join (cdr params) " ")))
+         (when buf
+           (clatter-insert-system buf msg))
+         (dolist (buf (clatter-channel-buffers network))
+           (clatter-insert-system buf msg)))
+       (when (clatter--prompt-format-needs-away-p)
+         (clatter--refresh-prompt)))
+      ;; --- MODE numerics ---
+      ("221"   ; RPL_UMODEIS
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network))
+              (nick (nth 0 params))
+              (modes (nth 1 params)))
+         (when buf
+           (clatter-insert-system buf (format "%s is %s" nick modes)))))
+      ("324"   ; RPL_CHANNELMODEIS
+       (let* ((network (clatter-connection-network-id conn))
+              (channel (nth 1 params))
+              (buf (clatter-get-buffer network channel))
+              (modes (nth 2 params)))
+         (when buf
+           (clatter-set-channel-modes buf modes)
+           (clatter-insert-system buf (format "%s is %s" channel modes)))))
+      ("329"   ; RPL_CREATIONTIME
+       (let* ((network (clatter-connection-network-id conn))
+              (channel (nth 1 params))
+              (buf (clatter-get-buffer network channel))
+              (ctime (string-to-number (nth 2 params))))
+         (when buf
+           (clatter-insert-system
+            buf (format "%s was created at %s"
+                        channel (format-time-string "%F %T" ctime))))))
+      ((or "401" "403"  ; ERR_NOSUCHNICK, ERR_NOSUCHCHANNEL
+           "404"        ; ERR_CANNOTSENDTOCHAN
+           "475")       ; ERR_BADCHANNELKEY
+       ;; Route to the buffer named by the reply's target param (a query
+       ;; buffer for 401's nick, a channel buffer for the others), falling
+       ;; back to the server buffer.  Do not use (current-buffer): the
+       ;; process filter may run in any buffer.
+       (let* ((network (clatter-connection-network-id conn))
+              (target (nth 1 params))
+              (buf (or (clatter-get-buffer network target)
+                       (clatter-get-server-buffer network))))
+         (when buf
+           (clatter-insert-system buf (string-join (reverse (cdr params)) " ")))))
+      ("421"                            ; ERR_UNKNOWNCOMMAND
+       ;; The server rejected a command we sent.  If it was TAGMSG, the
+       ;; server (or an upstream behind a bouncer/bridge) ACKed message-tags
+       ;; but does not actually accept TAGMSG; remember that so outbound
+       ;; typing/reaction TAGMSGs stop rather than spamming 421s every
+       ;; keystroke.  Still display the error so the user sees it once.
+       (let ((rejected-cmd (nth 1 params)))
+         (when (string-equal (and rejected-cmd (upcase rejected-cmd)) "TAGMSG")
+           (setf (clatter-connection-tagmsg-rejected conn) t)))
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network)))
+         (when buf
+           (clatter-insert-system
+            buf (format "[%s] %s" command (string-join (cdr params) " "))))))
+      ;; Catch-all: show any unhandled numeric (e.g. 421 ERR_UNKNOWNCOMMAND,
+      ;; 411/412/432/433/461/471-477 ...) in the server buffer instead of
+      ;; silently dropping it.
+      (_
+       (let* ((network (clatter-connection-network-id conn))
+              (buf (clatter-get-server-buffer network)))
+         (when buf
+           (clatter-insert-system
+            buf (format "[%s] %s" command (string-join (cdr params) " "))))))))
   ) ;; end of pcase / cl-block clatter-ui--on-numeric
 
 ;; --- Channel preview on hover (eldoc) ---

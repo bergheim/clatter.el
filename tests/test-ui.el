@@ -8,6 +8,15 @@
 (require 'clatter-nicklist)
 (require 'clatter-pals)
 
+(ert-deftest clatter-buffer-name-channel-style-qualifies-server-buffers ()
+  "Channel-style server buffers retain their network names."
+  (let ((clatter-buffer-name-style 'channel))
+    (should (equal (clatter-server-buffer-name "libera")
+                   "*libera/*server**"))
+    (should (equal (clatter-server-buffer-name "ergo")
+                   "*ergo/*server**"))
+    (should (equal (clatter-buffer-name "libera" "#emacs") "#emacs"))))
+
 (ert-deftest clatter-navigation-orders-messages-and-interactive-items ()
   "Navigation visits a message, its link, then the following message."
   (with-temp-buffer
@@ -462,6 +471,11 @@ always showing fool messages."
   (cl-count-if (lambda (overlay) (overlay-get overlay 'clatter-timestamp))
                (overlays-in (point-min) (point-max))))
 
+(defun clatter-test--timestamp-overlay ()
+  "Return the first message timestamp overlay in the current buffer."
+  (cl-find-if (lambda (overlay) (overlay-get overlay 'clatter-timestamp))
+              (overlays-in (point-min) (point-max))))
+
 (ert-deftest clatter-test-timestamps-only-if-changed-coalesces-formatted-values ()
   "Repeated formatted timestamps use one margin timestamp when enabled."
   (let ((clatter-timestamp-only-if-changed t)
@@ -534,7 +548,229 @@ always showing fool messages."
       (let ((clatter-timestamp-side nil))
         (clatter--sync-window-margins)
         (should-not (car (window-margins)))
+        (should-not (cdr (window-margins))))
+      (let ((clatter-timestamp-side 'divider))
+        (clatter--sync-window-margins)
+        (should-not (car (window-margins)))
+        (should-not (cdr (window-margins))))
+      (let ((clatter-timestamp-side 'inline))
+        (clatter--sync-window-margins)
+        (should-not (car (window-margins)))
         (should-not (cdr (window-margins)))))))
+
+(ert-deftest clatter-test-timestamp-inline-aligns-to-right ()
+  "Inline timestamps use an after-string aligned to the window edge."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (conn (clatter-test-make-connection))
+        (time (encode-time 0 12 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "hello" conn time)
+          (let ((ov (clatter-test--timestamp-overlay)))
+            (should ov)
+            (should-not (overlay-get ov 'after-string))
+            (let* ((before (overlay-get ov 'before-string))
+                   (display (get-text-property 0 'display before)))
+              (should (string-match-p "10:12" before))
+              (should (eq (car display) 'space))
+              (should (equal (plist-get (cdr display) :align-to) '(- right 5))))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-inline-break-when-wrapped ()
+  "A line with no room left for the stamp gets no stamp at all."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-tooltip-format "%H:%M:%S")
+        (clatter-timestamp-only-if-changed nil)
+        (clatter-fill-column nil)
+        (conn (clatter-test-make-connection))
+        (time (encode-time 0 12 10 1 1 2026))
+        (msg (make-string (+ (frame-width) 50) ?x)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" msg conn time)
+          (let ((ov (clatter-test--timestamp-overlay)))
+            (should ov)
+            ;; No stamp row of its own: a display-string row is anchored at a
+            ;; position a neighbouring row already owns, so point cannot land
+            ;; on it and vertical motion (evil j/k) gets trapped.
+            (should-not (overlay-get ov 'before-string))
+            (should-not (overlay-get ov 'after-string))
+            (should (equal (overlay-get ov 'help-echo) "10:12:00"))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-inline-stamps-system ()
+  "Inline stamps the same lines margin modes stamp, system included."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-only-if-changed nil)
+        (clatter-timestamp-format "%H:%M"))
+    (with-temp-buffer
+      (clatter-insert-system (current-buffer) "CTCP VERSION reply from knighthk")
+      (should (= 1 (clatter-test--timestamp-overlay-count))))))
+
+(ert-deftest clatter-test-timestamp-inline-drops-stamp-on-compact-growth ()
+  "A compact append re-checks the stamp's fit; overflow drops it."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-only-if-changed nil)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-compact-system-messages 'compact)
+        (clatter-compact-system-group-window 180)
+        (times '(100.0 110.0 120.0))
+        (long-nick (make-string (+ (frame-width) 20) ?x)))
+    (clatter-test-with-ui-connection conn
+      (ignore conn)
+      (let ((buffer (clatter-get-or-create-buffer "testnet" "#test")))
+        (cl-letf (((symbol-function 'clatter--compact-system-now)
+                   (lambda () (pop times))))
+          (clatter--insert-system-event
+           buffer 'join '(:nick "alice" :channel "#test") nil)
+          (with-current-buffer buffer
+            (should (overlay-get (clatter-test--timestamp-overlay)
+                                 'before-string)))
+          ;; A short append still fits: the stamp survives.
+          (clatter--insert-system-event
+           buffer 'join '(:nick "bob" :channel "#test") nil)
+          (with-current-buffer buffer
+            (should (overlay-get (clatter-test--timestamp-overlay)
+                                 'before-string)))
+          ;; Growing past the body width drops it, like a long message.
+          (clatter--insert-system-event
+           buffer 'join (list :nick long-nick :channel "#test") nil)
+          (with-current-buffer buffer
+            (should-not (overlay-get (clatter-test--timestamp-overlay)
+                                     'before-string))))))))
+
+(defun clatter-test--divider-positions ()
+  "Return buffer positions of minute-divider lines."
+  (clatter--navigation-property-positions 'clatter-timestamp-divider))
+
+(ert-deftest clatter-test-timestamp-divider-no-margin ()
+  "Divider timestamps do not reserve a window margin."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M"))
+    (with-temp-buffer
+      (clatter-mode)
+      (should (= left-margin-width 0))
+      (should (= right-margin-width 0)))))
+
+(ert-deftest clatter-test-timestamp-divider-coalesced ()
+  "Minute rows fire once per bucket, never twice in the same bucket."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (conn (clatter-test-make-connection))
+        (t1 (encode-time 30 12 10 1 1 2026))
+        (t1b (encode-time 59 12 10 1 1 2026))
+        (t2 (encode-time 0 13 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "hi" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "again" conn t1b)
+          (clatter-insert-privmsg (current-buffer) "bob" "yo" conn t2)
+          (should (= 2 (length (clatter-test--divider-positions))))
+          (should (string-match-p "— 10:12 —" (buffer-string)))
+          (should (string-match-p "— 10:13 —" (buffer-string)))
+          (let ((pos (clatter-test--divider-positions)))
+            (should-not (eq (line-number-at-pos (nth 1 pos))
+                            (1+ (line-number-at-pos (nth 0 pos)))))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-margin-respects-interval ()
+  "With only-if-changed, margin stamps coalesce to interval buckets too."
+  (let ((clatter-timestamp-side 'right)
+        (clatter-timestamp-only-if-changed t)
+        (clatter-timestamp-interval 10)
+        (clatter-timestamp-format "%H:%M")
+        (conn (clatter-test-make-connection))
+        (t1 (encode-time 0 12 10 1 1 2026))
+        (t2 (encode-time 0 19 10 1 1 2026))
+        (t3 (encode-time 0 22 10 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "a" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "b" conn t2)
+          (clatter-insert-privmsg (current-buffer) "bob" "c" conn t3)
+          (should (= 2 (clatter-test--timestamp-overlay-count))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-divider-rows-for-system-lines ()
+  "System lines open rows like any stamped line, coalesced per bucket."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M")
+        (t1 (encode-time 0 12 10 1 1 2026))
+        (t2 (encode-time 10 12 10 1 1 2026)))
+    (with-temp-buffer
+      (clatter--insert-message (current-buffer) "*** alice joined" nil nil t1 nil)
+      (clatter--insert-message (current-buffer) "*** bob parted" nil nil t2 nil)
+      (should (= 1 (length (clatter-test--divider-positions))))
+      (should (string-match-p "— 10:12 —" (buffer-string))))))
+
+(ert-deftest clatter-test-timestamp-divider-row-follows-opener-visibility ()
+  "A row inherits its opening line's invisible categories."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-format "%H:%M")
+        (t1 (encode-time 0 12 10 1 1 2026)))
+    (with-temp-buffer
+      (clatter--insert-message (current-buffer) "*** alice joined" nil nil t1 'join)
+      (let ((row (text-property-any (point-min) (point-max)
+                                    'clatter-timestamp-divider t)))
+        (should row)
+        (should (eq 'join (get-text-property row 'invisible)))
+        ;; Hidden with its opener under the default spec; shown once the
+        ;; category is taken out.
+        (should (invisible-p row))
+        (let ((buffer-invisibility-spec '(other)))
+          (should-not (invisible-p row)))))))
+
+(ert-deftest clatter-test-timestamp-divider-respects-interval ()
+  "Divider buckets span hour boundaries."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-interval 90)
+        (clatter-timestamp-format "%H:%M")
+        (conn (clatter-test-make-connection))
+        (t1 (encode-time 0 50 10 1 1 2026))
+        (t2 (encode-time 0 10 11 1 1 2026))
+        (t3 (encode-time 0 20 12 1 1 2026)))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-insert-privmsg (current-buffer) "alice" "a" conn t1)
+          (clatter-insert-privmsg (current-buffer) "alice" "b" conn t2)
+          (clatter-insert-privmsg (current-buffer) "bob" "c" conn t3)
+          (should (= 2 (length (clatter-test--divider-positions))))
+          (should (string-match-p "— 10:50 —" (buffer-string)))
+          (should-not (string-match-p "— 11:10 —" (buffer-string)))
+          (should (string-match-p "— 12:20 —" (buffer-string))))
+      (clatter-test-cleanup))))
+
+(ert-deftest clatter-test-timestamp-divider-seeds-on-setup ()
+  "A new buffer opens with a divider before its first message."
+  (let ((clatter-timestamp-side 'divider)
+        (clatter-timestamp-interval 10)
+        (clatter-timestamp-format "%H:%M")
+        (conn (clatter-test-make-connection))
+        (now (encode-time 0 12 10 1 1 2026))
+        (later (encode-time 0 22 10 1 1 2026)))
+    (unwind-protect
+        (dolist (clatter-message-order '(oldest-first newest-first))
+          (with-temp-buffer
+            (clatter-mode)
+            (setq-local clatter--network "testnet")
+            (setq-local clatter--target "#test")
+            (cl-letf (((symbol-function 'current-time) (lambda () now)))
+              (clatter-ui-setup-buffer (current-buffer)))
+            (should (= 1 (length (clatter-test--divider-positions))))
+            (should (string-match-p "— 10:12 —" (buffer-string)))
+            ;; Same bucket: reuse the seed and keep it before the message.
+            (clatter-insert-privmsg (current-buffer) "alice" "hi" conn now)
+            (should (= 1 (length (clatter-test--divider-positions))))
+            (should (< (car (clatter-test--divider-positions))
+                       (string-match-p "hi" (buffer-string))))
+            ;; A later bucket still opens a new row.
+            (clatter-insert-privmsg (current-buffer) "bob" "yo" conn later)
+            (should (= 2 (length (clatter-test--divider-positions))))))
+      (clatter-test-cleanup))))
 
 ;; --- Message filling ---
 
@@ -1647,6 +1883,26 @@ Both message orders keep the page's own messages in display order."
         (clatter-remove-buffer "libera" "#emacs")
         (when (buffer-live-p buf)
           (kill-buffer buf))))))
+
+(ert-deftest clatter-test-divider-stretches-to-window ()
+  "The bar centers its label and extends its rule to the window edge."
+  (let ((bar (clatter--divider "history")))
+    (should (string-match-p "history" bar))
+    (should (eq t (plist-get (get-text-property (1- (length bar)) 'face bar)
+                             :extend)))
+    (should (pcase (get-text-property 0 'display bar)
+              (`(space :align-to (- center ,(pred integerp))) t)))))
+
+(ert-deftest clatter-test-motd-uses-window-dividers ()
+  "MOTD boundaries use window-wide dividers."
+  (clatter-test-with-ui-connection conn
+    (let (labels)
+      (cl-letf (((symbol-function 'clatter--divider)
+                 (lambda (label)
+                   (push label labels)
+                   label)))
+        (clatter-ui--on-motd conn '("Welcome")))
+      (should (equal (nreverse labels) '("MOTD" "End of MOTD"))))))
 
 ;; --- Typing indicators ---
 
