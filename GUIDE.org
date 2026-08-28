@@ -392,6 +392,7 @@ Replies appear in the network's =*server*= buffer.
 | =/ns command=     | Send command to NickServ                            |
 | =/cs command=     | Send command to ChanServ                            |
 | =/whois [nick]=   | Query WHOIS information (defaults to your own nick) |
+| =/whoami=         | Query WHOIS information for your own nick            |
 | =/ghost [nick]=   | Kill a ghost session holding your nick              |
 | =/regain [nick]=  | Reclaim a nick via services and rename to it        |
 | =/reclaim on= / =/reclaim off= | Turn automatic nick reclaim on or off        |

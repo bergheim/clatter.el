@@ -289,6 +289,12 @@ Bare nicks are wildcarded to nick!*@*.  LABEL is used in usage messages."
               (clatter-send conn (clatter-irc-whois nick))
             (clatter-insert-error (current-buffer) "Usage: /whois [nick]")))))))
 
+(defun clatter-cmd-whoami (_args)
+  "Request WHOIS for our own nick; arguments are ignored."
+  (clatter-cmd-whois (or (clatter-connection-nick
+                          (clatter--require-conn))
+                         "")))
+
 (defun clatter-cmd-away (args)
   "Set away using ARGS as the message.  Empty ARGS clears away."
   (let ((conn (clatter--require-conn)))
@@ -636,6 +642,7 @@ With `none', clear all suppressions."
 (clatter-defcommand "ban" #'clatter-cmd-ban)
 (clatter-defcommand "unban" #'clatter-cmd-unban)
 (clatter-defcommand "whois" #'clatter-cmd-whois)
+(clatter-defcommand "whoami" #'clatter-cmd-whoami)
 (clatter-defcommand "who" #'clatter-cmd-who)
 (clatter-defcommand "whowas" #'clatter-cmd-whowas)
 (clatter-defcommand "ison" #'clatter-cmd-ison)

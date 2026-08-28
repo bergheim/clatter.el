@@ -100,6 +100,7 @@ Active when input starts with /."
                       ("topic" " View/set topic")
                       ("quit" " Disconnect")
                       ("whois" " Query user info")
+                      ("whoami" " WHOIS yourself")
                       ("kick" " Kick user")
                       ("ban" " Ban user")
                       ("mode" " Set mode")
