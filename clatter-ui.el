@@ -665,6 +665,7 @@ TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
   (let ((stamp (propertize ts-str
                            'face '(clatter-timestamp default)
                            'help-echo tooltip)))
+    (overlay-put ov 'help-echo tooltip)
     (if (eq clatter-timestamp-side 'inline)
         ;; Stamp sits on the message's last row; one that doesn't fit is
         ;; dropped.  No fresh-row fallback: an overlay-string row has no
@@ -711,11 +712,14 @@ marks follow the displayed value.  Above 1, minutes are floored to the
 interval: a value of 10 yields one mark per ten-minute clock bucket."
   (if (<= clatter-timestamp-interval 1)
       (format-time-string clatter-timestamp-format time)
-    (let ((dec (decode-time time)))
+    (let* ((dec (decode-time time))
+           (minute (+ (* 60 (decoded-time-hour dec))
+                      (decoded-time-minute dec))))
       (setf (decoded-time-second dec) 0
+            (decoded-time-hour dec) 0
             (decoded-time-minute dec)
             (* clatter-timestamp-interval
-               (/ (decoded-time-minute dec) clatter-timestamp-interval)))
+               (/ minute clatter-timestamp-interval)))
       (format-time-string clatter-timestamp-format (encode-time dec)))))
 
 (defun clatter--timestamp-divider-insert-row (formatted tooltip line-props
@@ -810,6 +814,13 @@ append at the bottom like a traditional IRC client."
                          ts-key ts-changed-p)
                 (clatter--timestamp-divider-insert-row
                  formatted-timestamp ts-tooltip-str line-props invisible))
+              ;; Newest-first inserts stay below their existing bucket row.
+              (when (and (eq clatter-timestamp-side 'divider)
+                         ts-key (not ts-changed-p)
+                         (eq clatter-message-order 'newest-first)
+                         (get-text-property (point)
+                                            'clatter-timestamp-divider))
+                (forward-line 1))
               (setq start (point))
               (insert text "\n")
               (when message-line-spacing
@@ -1215,8 +1226,10 @@ identical messages sent close together each reconcile only one local line."
                     (when (overlay-get overlay 'clatter-timestamp)
                       (clatter--timestamp-overlay-apply
                        overlay
-                       (format-time-string clatter-timestamp-format
-                                           server-time)))))
+                       (format-time-string clatter-timestamp-format server-time)
+                       (and clatter-timestamp-tooltip-format
+                            (format-time-string
+                             clatter-timestamp-tooltip-format server-time))))))
                 ;; Do not consume a pending record unless its tentative line
                 ;; still exists.  Buffer truncation may have removed it, in
                 ;; which case the caller must insert the server echo normally.

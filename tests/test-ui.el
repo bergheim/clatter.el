@@ -573,6 +573,7 @@ always showing fool messages."
   "A line with no room left for the stamp gets no stamp at all."
   (let ((clatter-timestamp-side 'inline)
         (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-tooltip-format "%H:%M:%S")
         (clatter-timestamp-only-if-changed nil)
         (clatter-fill-column nil)
         (conn (clatter-test-make-connection))
@@ -587,7 +588,8 @@ always showing fool messages."
             ;; position a neighbouring row already owns, so point cannot land
             ;; on it and vertical motion (evil j/k) gets trapped.
             (should-not (overlay-get ov 'before-string))
-            (should-not (overlay-get ov 'after-string))))
+            (should-not (overlay-get ov 'after-string))
+            (should (equal (overlay-get ov 'help-echo) "10:12:00"))))
       (clatter-test-cleanup))))
 
 (ert-deftest clatter-test-timestamp-inline-stamps-system ()
@@ -714,27 +716,27 @@ always showing fool messages."
           (should-not (invisible-p row)))))))
 
 (ert-deftest clatter-test-timestamp-divider-respects-interval ()
-  "Divider rows fire once per interval-sized clock bucket."
+  "Divider buckets span hour boundaries."
   (let ((clatter-timestamp-side 'divider)
-        (clatter-timestamp-interval 10)
+        (clatter-timestamp-interval 90)
         (clatter-timestamp-format "%H:%M")
         (conn (clatter-test-make-connection))
-        (t1 (encode-time 0 12 10 1 1 2026))
-        (t2 (encode-time 0 19 10 1 1 2026))
-        (t3 (encode-time 0 22 10 1 1 2026)))
+        (t1 (encode-time 0 50 10 1 1 2026))
+        (t2 (encode-time 0 10 11 1 1 2026))
+        (t3 (encode-time 0 20 12 1 1 2026)))
     (unwind-protect
         (with-temp-buffer
           (clatter-insert-privmsg (current-buffer) "alice" "a" conn t1)
           (clatter-insert-privmsg (current-buffer) "alice" "b" conn t2)
           (clatter-insert-privmsg (current-buffer) "bob" "c" conn t3)
           (should (= 2 (length (clatter-test--divider-positions))))
-          (should (string-match-p "— 10:12 —" (buffer-string)))
-          (should-not (string-match-p "— 10:19 —" (buffer-string)))
-          (should (string-match-p "— 10:22 —" (buffer-string))))
+          (should (string-match-p "— 10:50 —" (buffer-string)))
+          (should-not (string-match-p "— 11:10 —" (buffer-string)))
+          (should (string-match-p "— 12:20 —" (buffer-string))))
       (clatter-test-cleanup))))
 
 (ert-deftest clatter-test-timestamp-divider-seeds-on-setup ()
-  "A new buffer opens with a divider row; same-bucket messages reuse it."
+  "A new buffer opens with a divider before its first message."
   (let ((clatter-timestamp-side 'divider)
         (clatter-timestamp-interval 10)
         (clatter-timestamp-format "%H:%M")
@@ -742,20 +744,23 @@ always showing fool messages."
         (now (encode-time 0 12 10 1 1 2026))
         (later (encode-time 0 22 10 1 1 2026)))
     (unwind-protect
-        (with-temp-buffer
-          (clatter-mode)
-          (setq-local clatter--network "testnet")
-          (setq-local clatter--target "#test")
-          (cl-letf (((symbol-function 'current-time) (lambda () now)))
-            (clatter-ui-setup-buffer (current-buffer)))
-          (should (= 1 (length (clatter-test--divider-positions))))
-          (should (string-match-p "— 10:12 —" (buffer-string)))
-          ;; Same bucket: the seeded row is reused, no adjacent duplicate.
-          (clatter-insert-privmsg (current-buffer) "alice" "hi" conn now)
-          (should (= 1 (length (clatter-test--divider-positions))))
-          ;; A later bucket still opens a new row.
-          (clatter-insert-privmsg (current-buffer) "bob" "yo" conn later)
-          (should (= 2 (length (clatter-test--divider-positions)))))
+        (dolist (clatter-message-order '(oldest-first newest-first))
+          (with-temp-buffer
+            (clatter-mode)
+            (setq-local clatter--network "testnet")
+            (setq-local clatter--target "#test")
+            (cl-letf (((symbol-function 'current-time) (lambda () now)))
+              (clatter-ui-setup-buffer (current-buffer)))
+            (should (= 1 (length (clatter-test--divider-positions))))
+            (should (string-match-p "— 10:12 —" (buffer-string)))
+            ;; Same bucket: reuse the seed and keep it before the message.
+            (clatter-insert-privmsg (current-buffer) "alice" "hi" conn now)
+            (should (= 1 (length (clatter-test--divider-positions))))
+            (should (< (car (clatter-test--divider-positions))
+                       (string-match-p "hi" (buffer-string))))
+            ;; A later bucket still opens a new row.
+            (clatter-insert-privmsg (current-buffer) "bob" "yo" conn later)
+            (should (= 2 (length (clatter-test--divider-positions))))))
       (clatter-test-cleanup))))
 
 ;; --- Message filling ---
