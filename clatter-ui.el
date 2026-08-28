@@ -2695,16 +2695,16 @@ otherwise (the process filter may run in any buffer, so don't rely on
 
 (defun clatter--divider (label)
   "Return a window-wide divider line with LABEL centered.
-The rule segments are stretch glyphs drawn with `:strike-through', so
-redisplay recenters and resizes the bar with each window - same
-mechanism as `clatter-read-marker-line', no overlays or size hooks."
-  (let ((rule '(:inherit clatter-divider :strike-through t))
+The left rule is a stretch glyph; the right rule uses an extending face.
+Redisplay recenters and resizes the bar with each window, without
+width calculations, overlays, or resize hooks."
+  (let ((rule '(:inherit clatter-divider :strike-through t :extend t))
         (label (concat " " label " ")))
     (concat
      (propertize " " 'face rule
                  'display `(space :align-to (- center ,(/ (string-width label) 2))))
      (propertize label 'face 'clatter-divider)
-     (propertize " " 'face rule 'display '(space :align-to right)))))
+     (propertize " " 'face rule))))
 
 (defun clatter-ui--on-batch-complete (conn _batch-type target messages)
   "Handle completed batch: render MESSAGES for TARGET on CONN.

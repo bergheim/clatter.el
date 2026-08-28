@@ -1658,11 +1658,11 @@ Both message orders keep the page's own messages in display order."
           (kill-buffer buf))))))
 
 (ert-deftest clatter-test-divider-stretches-to-window ()
-  "The bar centers its label and fills the window via display specs."
+  "The bar centers its label and extends its rule to the window edge."
   (let ((bar (clatter--divider "history")))
     (should (string-match-p "history" bar))
-    (should (equal '(space :align-to right)
-                   (get-text-property (1- (length bar)) 'display bar)))
+    (should (eq t (plist-get (get-text-property (1- (length bar)) 'face bar)
+                             :extend)))
     (should (pcase (get-text-property 0 'display bar)
               (`(space :align-to (- center ,(pred integerp))) t)))))
 
