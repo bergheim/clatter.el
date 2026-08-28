@@ -38,6 +38,11 @@
   "Face for message timestamps."
   :group 'clatter)
 
+(defface clatter-divider
+  '((t :inherit shadow))
+  "Face for divider rows."
+  :group 'clatter)
+
 (defface clatter-nick
   '((t :weight bold))
   "Default face for nicks."
@@ -2540,10 +2545,10 @@ server buffer otherwise (e.g. the connect-time MOTD)."
                   (clatter-get-server-buffer network)
                   (clatter-get-or-create-buffer network "*server*" 'server))))
     (clatter-ui-setup-buffer-if-needed buf)
-    (clatter-insert-system buf "--- MOTD ---")
+    (clatter--insert-message buf (clatter--divider "MOTD") t)
     (dolist (line lines)
       (clatter-insert-system buf (clatter-hl-urls-in-string (clatter-format-parse line)) nil))
-    (clatter-insert-system buf "--- End of MOTD ---")))
+    (clatter--insert-message buf (clatter--divider "End of MOTD") t)))
 
 (defun clatter-ui--on-whois (conn nick data)
   "Handle WHOIS reply for UI: display NICK info from DATA.
@@ -2688,6 +2693,19 @@ otherwise (the process filter may run in any buffer, so don't rely on
                 (add-text-properties found (1+ found)
                                      (list 'clatter-reactions new-reactions))))))))))
 
+(defun clatter--divider (label)
+  "Return a window-wide divider line with LABEL centered.
+The rule segments are stretch glyphs drawn with `:strike-through', so
+redisplay recenters and resizes the bar with each window - same
+mechanism as `clatter-read-marker-line', no overlays or size hooks."
+  (let ((rule '(:inherit clatter-divider :strike-through t))
+        (label (concat " " label " ")))
+    (concat
+     (propertize " " 'face rule
+                 'display `(space :align-to (- center ,(/ (string-width label) 2))))
+     (propertize label 'face 'clatter-divider)
+     (propertize " " 'face rule 'display '(space :align-to right)))))
+
 (defun clatter-ui--on-batch-complete (conn _batch-type target messages)
   "Handle completed batch: render MESSAGES for TARGET on CONN.
 Renders a visual separator before and after history playback.
@@ -2708,15 +2726,9 @@ on screen, so it renders at the buffer's oldest end, in the direction
              ;; end separator, then messages newest-first, then the start
              ;; separator.
              (messages (if backlog (reverse messages) messages))
-             (sep-text (propertize
-                        (concat " " (make-string 30 ?-) " history "
-                                (make-string 30 ?-) " ")
-                        'face 'font-lock-doc-face))
-             (end-sep-text (propertize (format " %s end of history (%d messages) %s "
-                                               (make-string 20 ?-)
-                                               count
-                                               (make-string 20 ?-))
-                                       'face 'font-lock-doc-face)))
+             (sep-text (clatter--divider "history"))
+             (end-sep-text (clatter--divider
+                            (format "end of history (%d messages)" count))))
         (clatter--insert-message buf (if backlog end-sep-text sep-text) t)
         ;; Insert each message with dimmed style.  Suppress inline image
         ;; scanning/fetching for history playback: a large backlog would
