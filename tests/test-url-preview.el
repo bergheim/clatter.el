@@ -31,6 +31,17 @@
         (should-not (marker-insertion-type
                      (clatter-url-preview--anchor-tail captured-marker)))))))
 
+(ert-deftest clatter-url-preview-skips-media-with-query-string ()
+  "Media suffix exclusions ignore URL query strings and fragments."
+  (let ((clatter-url-preview-enable t)
+        (clatter-url-preview--pending (make-hash-table :test 'equal)))
+    (should-not
+     (clatter-url-preview--should-fetch-p
+      "https://cdn.example/photo.jpg?expires=1#preview"))
+    (should
+     (clatter-url-preview--should-fetch-p
+      "https://example.com/page?format=jpg"))))
+
 (ert-deftest clatter-url-preview-skips-fools ()
   "Links from fools are not fetched or rendered."
   (let ((clatter-url-preview-enable t)

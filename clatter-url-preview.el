@@ -73,11 +73,12 @@ cache hit or asynchronous request detaches them."
 
 (defun clatter-url-preview--should-fetch-p (url)
   "Return non-nil if URL should be fetched for title preview."
-  (and clatter-url-preview-enable
-       (string-match-p "^https?://" url)
-       (not (gethash url clatter-url-preview--pending))
-       (not (cl-some (lambda (pat) (string-match-p pat url))
-                     clatter-url-preview-exclude-patterns))))
+  (let ((path (car (split-string url "[?#]"))))
+    (and clatter-url-preview-enable
+         (string-match-p "^https?://" url)
+         (not (gethash url clatter-url-preview--pending))
+         (not (cl-some (lambda (pat) (string-match-p pat path))
+                       clatter-url-preview-exclude-patterns)))))
 
 (defun clatter-url-preview--extract-title (html)
   "Extract the <title> content from HTML string."
