@@ -4,6 +4,7 @@
 
 (require 'test-helper)
 (require 'clatter-ui)
+(require 'clatter-actions)
 (require 'clatter-commands)
 (require 'clatter-nicklist)
 (require 'clatter-pals)
@@ -80,9 +81,12 @@
               (clatter-insert-privmsg
                (current-buffer) "alice"
                (propertize "original" 'clatter-msgid "msg-1") conn)
-              (clatter-insert-privmsg
-               (current-buffer) "bob"
-               (propertize "reply" 'clatter-reply-to "msg-1") conn)
+              (let ((buffer (current-buffer)))
+                ;; Process filters render while their connection buffer is current.
+                (with-temp-buffer
+                  (clatter-insert-privmsg
+                   buffer "bob"
+                   (propertize "reply" 'clatter-reply-to "msg-1") conn)))
               (let* ((button (next-button (point-min) t))
                      (position (and button (button-start button))))
                 (should button)
@@ -91,6 +95,41 @@
                 (push-button)
                 (should (equal (get-text-property (point) 'clatter-msgid)
                                "msg-1"))))))
+      (remhash "testnet" clatter-connections))))
+
+(ert-deftest clatter-reply-selects-message-at-line-boundary ()
+  "Replying at line start sends the current message's ID."
+  (let ((conn (clatter-test-make-connection "testnet" "me")))
+    (unwind-protect
+        (dolist (order '(oldest-first newest-first))
+          (with-temp-buffer
+            (let ((clatter-message-order order))
+              (clatter-mode)
+              (setq-local clatter--network "testnet")
+              (setq-local clatter--target "#test")
+              (clatter-ui-setup-buffer (current-buffer))
+              (dolist (message '(("alice" "first" "msg-1")
+                                 ("bob" "second" "msg-2")
+                                 ("carol" "third" "msg-3")))
+                (clatter-insert-privmsg
+                 (current-buffer) (nth 0 message)
+                 (propertize (nth 1 message)
+                             'clatter-msgid (nth 2 message))
+                 conn))
+              (goto-char (clatter--find-message-position-by-msgid
+                          (current-buffer) "msg-2"))
+              (clatter-action-reply)
+              (should (equal (clatter--get-input) "/reply bob: "))
+              (should (equal (get-text-property
+                              (overlay-start mouse-secondary-overlay)
+                              'clatter-msgid)
+                             "msg-2"))
+              (clatter-test-with-mock-send
+                (clatter-cmd-reply "answer")
+                (should (equal (clatter-test-last-sent)
+                               "@+reply=msg-2 PRIVMSG #test answer"))))))
+      (when (overlayp mouse-secondary-overlay)
+        (delete-overlay mouse-secondary-overlay))
       (remhash "testnet" clatter-connections))))
 
 (ert-deftest clatter-tab-and-backtab-preserve-input-behavior ()
@@ -291,6 +330,25 @@
       (should (eq (clatter-get-buffer "testnet" "#chan") chan))
       (should-not (clatter-get-server-buffer "testnet")))))
 ;; --- Self echo ---
+
+(ert-deftest clatter-test-optimistic-reply-renders-context ()
+  "An optimistic reply immediately shows its parent context."
+  (let ((clatter-self-echo-mode 'optimistic)
+        (clatter-timestamp-side nil))
+    (unwind-protect
+        (clatter-test-with-mock-send
+          (let* ((conn (clatter-test-make-connection "echo-reply" "me"))
+                 (buf (clatter-get-or-create-buffer "echo-reply" "#test")))
+            (clatter-ui-setup-buffer-if-needed buf)
+            (with-current-buffer buf
+              (clatter-insert-privmsg
+               buf "alice" (propertize "parent" 'clatter-msgid "msg-1") conn)
+              (clatter-ui--send-privmsg
+               conn "#test" "answer" nil buf '(("+reply" . "msg-1")))
+              (let ((button (next-button (point-min) t)))
+                (should button)
+                (should (equal (button-get button 'reply-to) "msg-1"))))))
+      (clatter-test-cleanup))))
 
 (ert-deftest clatter-test-optimistic-self-echo-reconciles-server-metadata ()
   "An optimistic local line is replaced by its server echo metadata."

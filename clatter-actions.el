@@ -42,8 +42,11 @@
   "Select the message at point."
   (interactive)
   (when-let* ((msgid (get-text-property (point) 'clatter-msgid))
-              (begin (previous-single-property-change (point) 'clatter-msgid))
-              (end (next-single-property-change (point) 'clatter-msgid)))
+              (begin (previous-single-property-change
+                      (min (1+ (point)) (point-max))
+                      'clatter-msgid nil (point-min)))
+              (end (next-single-property-change
+                    (point) 'clatter-msgid nil (point-max))))
     ;; Ensure the message marker is outside the boundaries of the region,
     ;; so that newly-added messages are not included in the selection.
     (when (and (= begin clatter--messages-marker)
@@ -62,19 +65,29 @@
 
 (defun clatter-action-reply (&optional arg)
   "Reply to the message at point.
-Inserts the sender's nick at the input prompt.
-With a prefix argument ARG, uses a /reply command."
+Uses a threaded reply when `message-tags' and a message ID are available.
+With a prefix argument ARG, requires a threaded reply."
   (interactive "P")
   (let* ((props (clatter-action--msg-at-point))
-         (sender (plist-get props :sender)))
-    (if (and sender (or (not arg) (clatter-select-message)))
+         (sender (plist-get props :sender))
+         (conn (and clatter--network
+                    (clatter-get-connection clatter--network)))
+         (threaded-p
+          (or arg
+              (and conn
+                   (member "message-tags"
+                           (clatter-connection-cap-enabled conn))
+                   (get-text-property (point) 'clatter-msgid)))))
+    (if (and sender (or (not threaded-p) (clatter-select-message)))
         (progn
           (goto-char clatter--input-marker)
           (goto-char (save-excursion
                        (goto-char clatter--input-marker)
                        (line-end-position)))
           (let ((inhibit-read-only t))
-            (if arg (insert "/reply " sender ": ") (insert sender ": "))))
+            (if threaded-p
+                (insert "/reply " sender ": ")
+              (insert sender ": "))))
       (message "No message at point"))))
 
 (defun clatter-action-react ()

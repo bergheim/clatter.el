@@ -405,13 +405,13 @@
 ;; --- Reply/Thread tags ---
 
 (ert-deftest clatter-test-dispatch-reply-tag ()
-  "PRIVMSG with draft/reply tag attaches reply-to property."
+  "PRIVMSG with +reply tag attaches reply-to property."
   (let ((conn (clatter-test-make-connection)))
     (unwind-protect
         (let ((calls (clatter-test-capture-hook clatter-privmsg-hook
                        (clatter-dispatch-message
                         conn (clatter-test-parse
-                              "@+draft/reply=msg999;msgid=msg1000 :alice!~a@host PRIVMSG #emacs :replying")))))
+                              "@+reply=msg999;msgid=msg1000 :alice!~a@host PRIVMSG #emacs :replying")))))
           (should (= (length calls) 1))
           (let* ((args (car calls))
                  (text (nth 3 args)))

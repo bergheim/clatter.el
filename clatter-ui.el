@@ -1005,9 +1005,10 @@ Removes oldest messages from the appropriate end of the buffer."
 Returns ((sender . text) . msg-type) or nil."
   (let ((found (clatter--find-message-position-by-msgid buffer msgid)))
     (when found
-      (cons (cons (get-text-property found 'clatter-sender)
-                  (get-text-property found 'clatter-text))
-            (get-text-property found 'clatter-msg-type)))))
+      (with-current-buffer buffer
+        (cons (cons (get-text-property found 'clatter-sender)
+                    (get-text-property found 'clatter-text))
+              (get-text-property found 'clatter-msg-type))))))
 
 (defun clatter-jump-to-msgid (buffer msgid)
   "Jump to BUFFER message identified by MSGID."
@@ -1222,7 +1223,14 @@ non-nil, are the message tags to be affixed to the message."
   (let* ((msg-type (or msg-type 'privmsg))
          (buffer (or buffer (current-buffer)))
          (sender (clatter-connection-nick conn))
-         (echo-message-p (member "echo-message" (clatter-connection-cap-enabled conn))))
+         (echo-message-p (member "echo-message" (clatter-connection-cap-enabled conn)))
+         (reply-to (or (cdr (assoc "+reply" tags))
+                       (cdr (assoc "+draft/reply" tags))
+                       (cdr (assoc "draft/reply" tags))))
+         (echo-text (copy-sequence text)))
+    (when reply-to
+      (put-text-property 0 (length echo-text)
+                         'clatter-reply-to reply-to echo-text))
     (clatter-send conn (clatter-irc-privmsg
                         target
                         (if (eq 'action msg-type)
@@ -1235,7 +1243,7 @@ non-nil, are the message tags to be affixed to the message."
      ;; expectation we'll receive a server-side echo later.
      ((and echo-message-p (eq clatter-self-echo-mode 'optimistic))
       (let* ((nonce (cl-incf clatter--self-echo-nonce))
-             (tentative (propertize (copy-sequence text) 'clatter-self-echo-nonce nonce)))
+             (tentative (propertize echo-text 'clatter-self-echo-nonce nonce)))
         (pcase msg-type
           ('action (clatter-insert-action buffer sender tentative conn))
           (_ (clatter-insert-privmsg buffer sender tentative conn)))
@@ -1247,12 +1255,12 @@ non-nil, are the message tags to be affixed to the message."
         ('action (run-hook-with-args 'clatter-action-hook
                                      conn
                                      (list sender "*" "*") ;; * = Placeholder
-                                     target text
+                                     target echo-text
                                      nil))
         (_ (run-hook-with-args 'clatter-privmsg-hook
                                conn
                                (list sender "*" "*")       ;; * = Placeholder
-                               target text
+                               target echo-text
                                nil)))))))
 
 (defun clatter-ui--send-privmsg (conn target text &optional msg-type buffer tags)

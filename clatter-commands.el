@@ -891,12 +891,12 @@ Usage: /searchhere QUERY."
 (defun clatter-cmd-reply (args)
   "Reply to the selected message with ARGS as the text.
 Usage: /reply TEXT.
-Uses +draft/reply tag to thread the response."
+Uses the IRCv3 +reply tag to thread the response."
   (let* ((text (string-trim args))
          (msgid (and mouse-secondary-overlay
                      (eq (current-buffer) (overlay-buffer mouse-secondary-overlay))
                      (get-text-property (overlay-start mouse-secondary-overlay) 'clatter-msgid)))
-         (tags `(("+draft/reply" . ,msgid)))
+         (tags `(("+reply" . ,msgid)))
          (target clatter--target)
          (conn (clatter--current-conn)))
     (cond
