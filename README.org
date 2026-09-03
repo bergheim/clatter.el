@@ -235,7 +235,7 @@ Every optional extra enabled at once, as a starting point to trim down:
 | Mode-line activity tracking, unread counts, mentions | =clatter-track=        | =clatter-track-enabled= (on)                  |
 | Desktop notifications with per-channel rules         | =clatter-notify=       | =clatter-notify-enabled= (on)                 |
 | Nick colorization (theme faces) + clickable URLs     | =clatter-hl-nicks=     | =clatter-hl-nicks-enabled= (on)               |
-| mIRC color and formatting codes                      | =clatter-format=       | =clatter-format-enable= (on)                  |
+| Incoming and editable mIRC formatting                | =clatter-format=       | on (=C-c C-f= while editing)                  |
 | Completion for nicks, =/commands=, =#channels=       | =clatter-completion=   | always (=TAB=, standard CAPF)                 |
 | Message action menu at point                         | =clatter-actions=      | always (=C-c C-a=)                            |
 | Smart noise filtering by signal-to-noise ratio       | =clatter-smart=        | =clatter-smart-enabled= (on)                  |
@@ -255,9 +255,9 @@ Every optional extra enabled at once, as a starting point to trim down:
 ** Keybindings
 
 clatter binds no global keys. Inside a chat buffer =RET= sends, =TAB=
-completes, =M-p= / =M-n= walk the input history and =C-c C-a= opens the action
-menu. The full default keymaps, plus Evil and vanilla binding examples, are in
-[[file:GUIDE.org][GUIDE.org]].
+completes, =M-p= / =M-n= walk the input history, =C-c C-f= applies IRC
+formatting and =C-c C-a= opens the action menu. The full default keymaps, plus
+Evil and vanilla binding examples, are in [[file:GUIDE.org][GUIDE.org]].
 
 ** Companion Packages
 

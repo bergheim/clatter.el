@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'clatter-config)
+(require 'clatter-format)
 (require 'clatter-protocol)
 (require 'clatter-connection)
 (require 'clatter-model)
@@ -1702,6 +1703,181 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
     (clatter--insert-message buffer formatted)))
 
 ;; --- Input prompt ---
+(defvar clatter-input-formatting-mode-map
+  (let ((map (make-sparse-keymap))
+        (prefix (make-sparse-keymap)))
+    (define-key prefix (kbd "b") #'clatter-input-bold)
+    (define-key prefix (kbd "i") #'clatter-input-italic)
+    (define-key prefix (kbd "u") #'clatter-input-underline)
+    (define-key prefix (kbd "s") #'clatter-input-strikethrough)
+    (define-key prefix (kbd "m") #'clatter-input-monospace)
+    (define-key prefix (kbd "v") #'clatter-input-reverse)
+    (define-key prefix (kbd "r") #'clatter-input-reset)
+    (define-key prefix (kbd "c") #'clatter-input-color)
+    (define-key map (kbd "C-c C-f") prefix)
+    map)
+  "Keymap for `clatter-input-formatting-mode'.")
+
+(defvar-local clatter-input-formatting--overlays nil
+  "Overlays rendering IRC formatting in the current input.")
+
+(defun clatter-input-formatting--clear ()
+  "Delete overlays created by `clatter-input-formatting-mode'."
+  (mapc #'delete-overlay clatter-input-formatting--overlays)
+  (setq clatter-input-formatting--overlays nil))
+
+(defun clatter-input-formatting--input-bounds ()
+  "Return the live Clatter input bounds, or nil."
+  (when (and (markerp clatter--input-marker)
+             (marker-position clatter--input-marker)
+             (markerp clatter--messages-marker)
+             (marker-position clatter--messages-marker))
+    (cons (marker-position clatter--input-marker) (clatter--input-end))))
+
+(defun clatter-input-formatting--refresh ()
+  "Render IRC formatting in the current input."
+  (clatter-input-formatting--clear)
+  (let ((bounds (clatter-input-formatting--input-bounds)))
+    (when bounds
+      (setq clatter-input-formatting--overlays
+            (clatter-format-propertize-region (car bounds) (cdr bounds))))))
+
+(defun clatter-input-formatting--after-change (beg end _old-len)
+  "Refresh input formatting when a change from BEG to END touches the input."
+  (let ((bounds (clatter-input-formatting--input-bounds)))
+    (when (and bounds
+               (<= beg (cdr bounds))
+               (>= end (car bounds)))
+      ;; ponytail: IRC state is prefix-dependent; rescan short drafts, add checkpoints only if measured.
+      (clatter-input-formatting--refresh))))
+
+(define-minor-mode clatter-input-formatting-mode
+  "Render literal IRC formatting controls in the editable input."
+  :init-value nil
+  :lighter nil
+  :keymap clatter-input-formatting-mode-map
+  (if clatter-input-formatting-mode
+      (progn
+        (add-hook 'after-change-functions
+                  #'clatter-input-formatting--after-change nil t)
+        (add-hook 'change-major-mode-hook
+                  #'clatter-input-formatting--clear nil t)
+        (clatter-input-formatting--refresh))
+    (remove-hook 'after-change-functions
+                 #'clatter-input-formatting--after-change t)
+    (remove-hook 'change-major-mode-hook
+                 #'clatter-input-formatting--clear t)
+    (clatter-input-formatting--clear)))
+
+(defun clatter-input-formatting--insert (opening &optional closing)
+  "Insert OPENING at the effective input point.
+When CLOSING and an active input region exist, wrap it with both strings."
+  (let ((bounds (clatter-input-formatting--input-bounds)))
+    (unless bounds
+      (user-error "Current buffer has no Clatter input area"))
+    (if (and closing (use-region-p))
+        (let ((region-start (region-beginning))
+              (region-end (region-end)))
+          (unless (and (<= (car bounds) region-start)
+                       (<= region-end (cdr bounds)))
+            (user-error "Region must be inside the Clatter input area"))
+          (let ((start-marker (copy-marker region-start))
+                (end-marker (copy-marker region-end t)))
+            (unwind-protect
+                (progn
+                  (atomic-change-group
+                    (goto-char end-marker)
+                    (insert closing)
+                    (goto-char start-marker)
+                    (insert opening))
+                  (goto-char end-marker)
+                  (deactivate-mark))
+              (set-marker start-marker nil)
+              (set-marker end-marker nil))))
+      (unless (and (<= (car bounds) (point))
+                   (<= (point) (cdr bounds)))
+        (goto-char (cdr bounds)))
+      (insert opening))))
+
+(defun clatter-input-bold ()
+  "Insert or wrap the input with an IRC bold toggle."
+  (interactive)
+  (clatter-input-formatting--insert
+   (string clatter-format--bold) (string clatter-format--bold)))
+
+(defun clatter-input-italic ()
+  "Insert or wrap the input with an IRC italic toggle."
+  (interactive)
+  (clatter-input-formatting--insert
+   (string clatter-format--italic) (string clatter-format--italic)))
+
+(defun clatter-input-underline ()
+  "Insert or wrap the input with an IRC underline toggle."
+  (interactive)
+  (clatter-input-formatting--insert
+   (string clatter-format--underline) (string clatter-format--underline)))
+
+(defun clatter-input-strikethrough ()
+  "Insert or wrap the input with an IRC strikethrough toggle."
+  (interactive)
+  (clatter-input-formatting--insert
+   (string clatter-format--strikethrough)
+   (string clatter-format--strikethrough)))
+
+(defun clatter-input-monospace ()
+  "Insert or wrap the input with an IRC monospace toggle."
+  (interactive)
+  (clatter-input-formatting--insert
+   (string clatter-format--monospace) (string clatter-format--monospace)))
+
+(defun clatter-input-reverse ()
+  "Insert or wrap the input with an IRC reverse-video toggle."
+  (interactive)
+  (clatter-input-formatting--insert
+   (string clatter-format--reverse) (string clatter-format--reverse)))
+
+(defun clatter-input-reset ()
+  "Insert an IRC formatting reset in the input."
+  (interactive)
+  (clatter-input-formatting--insert (string clatter-format--reset)))
+
+(defun clatter-input-color ()
+  "Insert or wrap the input with an indexed IRC color."
+  (interactive)
+  (unless (clatter-input-formatting--input-bounds)
+    (user-error "Current buffer has no Clatter input area"))
+  (let* ((palette
+          (cl-loop for index below 99
+                   collect
+                   (format "%02d %s %s"
+                           index
+                           (clatter-format--color-name-for-index index)
+                           (clatter-format--color-for-index index))))
+         (completion-extra-properties
+          (list
+           :annotation-function
+           (lambda (candidate)
+             (unless (member candidate '("default" "none"))
+               (concat
+                " "
+                (propertize
+                 "  " 'face
+                 (list :background
+                       (clatter-format--color-for-index
+                        (string-to-number candidate)))))))))
+         (foreground
+          (completing-read "Foreground: " (cons "default" palette) nil t))
+         (background
+          (unless (equal foreground "default")
+            (completing-read "Background: " (cons "none" palette) nil t)))
+         (opening
+          (concat (string clatter-format--color)
+                  (unless (equal foreground "default")
+                    (concat (substring foreground 0 2)
+                            (unless (equal background "none")
+                              (concat "," (substring background 0 2))))))))
+    (clatter-input-formatting--insert
+     opening (string clatter-format--color))))
 
 (defun clatter--align-prompt (prompt)
   "Right-align the visible part of PROMPT in the nick column.
@@ -1896,7 +2072,9 @@ conventional IRC client, with messages accumulating above it."
           (set-marker-insertion-type clatter--messages-marker nil)))
       (goto-char clatter--input-marker)
       (add-hook 'pre-command-hook #'clatter--move-to-prompt nil t)
-      (clatter--refresh-input-spacers buffer))))
+      (clatter--refresh-input-spacers buffer)
+      (when clatter-input-formatting-mode
+        (clatter-input-formatting--refresh)))))
 
 (defun clatter--input-end ()
   "Return the buffer position just past the user input.
@@ -3316,6 +3494,7 @@ Requires the server to support the message-tags capability."
   (add-hook 'clatter-numeric-hook #'clatter-ui--on-numeric)
   (add-hook 'clatter-typing-hook #'clatter-ui--on-typing)
   (add-hook 'clatter-mode-hook #'clatter-ui--setup-eldoc)
+  (add-hook 'clatter-mode-hook #'clatter-input-formatting-mode)
   ;; Key bindings for input
   (define-key clatter-mode-map (kbd "RET") #'clatter-send-input)
   (define-key clatter-mode-map (kbd "TAB") #'clatter-tab)

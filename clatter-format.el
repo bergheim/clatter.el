@@ -69,6 +69,38 @@ Overrides `clatter-format-enable'."
    "#818181" "#9f9f9f" "#bcbcbc" "#e2e2e2" "#ffffff"]
   "Extended mIRC color palette (indices 16-98).")
 
+(defconst clatter-format--mirc-color-names
+  ["white" "black" "blue" "green" "light red" "brown" "purple" "orange"
+   "yellow" "light green" "cyan" "light cyan" "light blue" "pink" "grey"
+   "light grey"]
+  "Names of the standard mIRC colors.")
+
+(defconst clatter-format--extended-color-hues
+  ["red" "orange" "yellow" "lime" "green" "mint"
+   "cyan" "azure" "blue" "violet" "magenta" "pink"])
+
+(defconst clatter-format--extended-color-shades
+  ["dark" "deep" "medium" "vivid" "light" "pale"])
+
+(defconst clatter-format--extended-grey-names
+  ["black" "near black" "charcoal" "dark grey" "deep grey" "medium grey"
+   "grey" "light grey" "silver" "pale grey" "white"])
+
+(defun clatter-format--color-name-for-index (idx)
+  "Return a readable name for IRC color index IDX."
+  (cond
+   ((and (>= idx 0) (< idx 16))
+    (aref clatter-format--mirc-color-names idx))
+   ((and (>= idx 16) (< idx 88))
+    ;; Extended colors have fixed values but no standardized names.
+    (let ((offset (- idx 16)))
+      (format "%s %s"
+              (aref clatter-format--extended-color-shades (/ offset 12))
+              (aref clatter-format--extended-color-hues (% offset 12)))))
+   ((and (>= idx 88) (< idx 99))
+    (aref clatter-format--extended-grey-names (- idx 88)))
+   (t nil)))
+
 (defun clatter-format--color-for-index (idx)
   "Return hex color string for mIRC color index IDX."
   (cond
@@ -118,12 +150,14 @@ If `clatter-format-enable' is nil, returns TEXT unchanged."
                   "\x04\\([0-9a-fA-F]\\{6\\}\\(,[0-9a-fA-F]\\{6\\}\\)?\\)?" "" result))
     (replace-regexp-in-string "[\x02\x0F\x11\x16\x1D\x1E\x1F]" "" result)))
 
-(defun clatter-format--render (text)
-  "Render mIRC formatting codes in TEXT as Emacs face properties."
+(defun clatter-format--scan (text function)
+  "Scan IRC formatting in TEXT and call FUNCTION for each source run.
+FUNCTION receives START, END, FACE and CONTROL-P.  START and END are
+positions in TEXT, FACE is the active face for visible text, and CONTROL-P
+is non-nil for a recognized formatting control and its consumed arguments."
   (let ((pos 0)
         (len (length text))
-        (result "")
-        ;; Active state
+        (controls "[\x02\x03\x04\x0F\x11\x16\x1D\x1E\x1F]")
         (bold nil)
         (italic nil)
         (underline nil)
@@ -133,74 +167,58 @@ If `clatter-format-enable' is nil, returns TEXT unchanged."
         (fg-color nil)
         (bg-color nil))
     (while (< pos len)
-      (let ((ch (aref text pos)))
+      (let ((start pos)
+            (ch (aref text pos))
+            (control-p t))
         (cond
-         ;; Bold toggle
          ((= ch clatter-format--bold)
           (setq bold (not bold))
           (cl-incf pos))
-
-         ;; Italic toggle
          ((= ch clatter-format--italic)
           (setq italic (not italic))
           (cl-incf pos))
-
-         ;; Underline toggle
          ((= ch clatter-format--underline)
           (setq underline (not underline))
           (cl-incf pos))
-
-         ;; Strikethrough toggle
          ((= ch clatter-format--strikethrough)
           (setq strikethrough (not strikethrough))
           (cl-incf pos))
-
-         ;; Reverse toggle
          ((= ch clatter-format--reverse)
           (setq reverse-video (not reverse-video))
           (cl-incf pos))
-
-         ;; Monospace toggle
          ((= ch clatter-format--monospace)
           (setq monospace (not monospace))
           (cl-incf pos))
-
-         ;; Reset all
          ((= ch clatter-format--reset)
           (setq bold nil italic nil underline nil
                 strikethrough nil reverse-video nil
                 monospace nil fg-color nil bg-color nil)
           (cl-incf pos))
-
-         ;; Color code: \x03[fg[,bg]]
          ((= ch clatter-format--color)
           (cl-incf pos)
           (if (and (< pos len) (clatter-format--ascii-digit-p (aref text pos)))
-              ;; Parse foreground
               (let ((fg-start pos))
-                (while (and (< pos len) (clatter-format--ascii-digit-p (aref text pos))
+                (while (and (< pos len)
+                            (clatter-format--ascii-digit-p (aref text pos))
                             (< (- pos fg-start) 2))
                   (cl-incf pos))
-                (setq fg-color (clatter-format--color-for-index
-                                (string-to-number (substring text fg-start pos))))
-                ;; Optional background
-                (if (and (< pos len) (= (aref text pos) ?,)
-                         (< (1+ pos) len) (clatter-format--ascii-digit-p (aref text (1+ pos))))
-                    (progn
-                      (cl-incf pos) ; skip comma
-                      (let ((bg-start pos))
-                        (while (and (< pos len) (clatter-format--ascii-digit-p (aref text pos))
-                                    (< (- pos bg-start) 2))
-                          (cl-incf pos))
-                        (setq bg-color (clatter-format--color-for-index
-                                        (string-to-number
-                                         (substring text bg-start pos))))))
-                  ;; No background specified
-                  nil))
-            ;; Bare \x03 with no number = reset colors
+                (setq fg-color
+                      (clatter-format--color-for-index
+                       (string-to-number (substring text fg-start pos))))
+                (when (and (< pos len) (= (aref text pos) ?,)
+                           (< (1+ pos) len)
+                           (clatter-format--ascii-digit-p (aref text (1+ pos))))
+                  (cl-incf pos)
+                  (let ((bg-start pos))
+                    (while (and (< pos len)
+                                (clatter-format--ascii-digit-p (aref text pos))
+                                (< (- pos bg-start) 2))
+                      (cl-incf pos))
+                    (setq bg-color
+                          (clatter-format--color-for-index
+                           (string-to-number
+                            (substring text bg-start pos)))))))
             (setq fg-color nil bg-color nil)))
-
-         ;; Hex color: \x04[RRGGBB[,RRGGBB]]
          ((= ch clatter-format--hex-color)
           (cl-incf pos)
           (if (and (<= (+ pos 6) len)
@@ -213,23 +231,50 @@ If `clatter-format-enable' is nil, returns TEXT unchanged."
                            (<= (+ pos 7) len)
                            (string-match-p "\\`[0-9a-fA-F]\\{6\\}"
                                            (substring text (1+ pos) (+ pos 7))))
-                  (cl-incf pos) ; skip comma
+                  (cl-incf pos)
                   (setq bg-color (concat "#" (substring text pos (+ pos 6))))
                   (cl-incf pos 6)))
-            ;; Bare \x04 = reset colors
             (setq fg-color nil bg-color nil)))
-
-         ;; Normal character - apply current formatting
          (t
-          (let ((face (clatter-format--build-face
-                       bold italic underline strikethrough
-                       reverse-video monospace fg-color bg-color))
-                (char-str (char-to-string ch)))
-            (when face
-              (setq char-str (propertize char-str 'face face)))
-            (setq result (concat result char-str)))
-          (cl-incf pos)))))
-    result))
+          (setq control-p nil
+                pos (or (string-match controls text pos) len))))
+        (if control-p
+            (funcall function start pos nil t)
+          (funcall function
+                   start pos
+                   (clatter-format--build-face
+                    bold italic underline strikethrough
+                    reverse-video monospace fg-color bg-color)
+                   nil))))))
+
+(defun clatter-format--render (text)
+  "Render mIRC formatting codes in TEXT as Emacs face properties."
+  (let (result)
+    (clatter-format--scan
+     text
+     (lambda (start end face control-p)
+       (unless control-p
+         (let ((run (substring-no-properties text start end)))
+           (push (if face (propertize run 'face face) run) result)))))
+    (apply #'concat (nreverse result))))
+
+(defun clatter-format-propertize-region (beg end)
+  "Render IRC formatting between BEG and END using overlays.
+The buffer text and its existing text properties are not changed.  Return
+the generated overlays, or nil when the region contains no formatting."
+  (let ((text (buffer-substring-no-properties beg end))
+        overlays)
+    (clatter-format--scan
+     text
+     (lambda (start finish face control-p)
+       (when (or control-p face)
+         (let ((overlay (make-overlay (+ beg start) (+ beg finish))))
+           (overlay-put overlay 'evaporate t)
+           (overlay-put overlay 'clatter-input-formatting t)
+           (overlay-put overlay (if control-p 'display 'face)
+                        (if control-p "" face))
+           (push overlay overlays)))))
+    (nreverse overlays)))
 
 (defun clatter-format--build-face (bold italic underline strikethrough
                                         reverse-video monospace fg-color bg-color)

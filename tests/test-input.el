@@ -80,6 +80,12 @@ Within BODY, `buffer' and `window' name the temporary buffer and its window."
   (when clatter--input-padding-end
     (count-lines (point-min) clatter--input-padding-end)))
 
+(defun clatter-input-test--formatting-overlays ()
+  "Return input-formatting overlays in the current buffer."
+  (seq-filter
+   (lambda (overlay) (overlay-get overlay 'clatter-input-formatting))
+   (overlays-in (point-min) (point-max))))
+
 (ert-deftest clatter-prompt-format-expands-placeholders ()
   "String prompt formats expand target, nick, network, and percent."
   (let ((clatter-prompt-format "%N/%n:%t %% "))
@@ -612,6 +618,137 @@ positions or it deletes the wrong (message) text."
   (let ((buffer-undo-list (list 10 (cons 5 8))))
     (clatter--update-undo-list 0)
     (should (equal buffer-undo-list (list 10 (cons 5 8))))))
+
+(ert-deftest clatter-input-formatting-styles ()
+  "Style commands wrap selected input and render in both prompt orders."
+  (dolist (order '(oldest-first newest-first))
+    (dolist (spec
+             `(("b" clatter-input-bold ,clatter-format--bold (:weight bold))
+               ("i" clatter-input-italic ,clatter-format--italic (:slant italic))
+               ("u" clatter-input-underline ,clatter-format--underline
+                (:underline t))
+               ("s" clatter-input-strikethrough
+                ,clatter-format--strikethrough (:strike-through t))
+               ("m" clatter-input-monospace ,clatter-format--monospace
+                (:family "Monospace"))
+               ("v" clatter-input-reverse ,clatter-format--reverse
+                (:inverse-video t))))
+      (pcase-let ((`(,key ,command ,control ,face) spec))
+        (clatter-input-test--with order
+          (buffer-enable-undo)
+          (should clatter-input-formatting-mode)
+          (clatter--set-input "word")
+          (setq buffer-undo-list nil
+                transient-mark-mode t)
+          (goto-char clatter--input-marker)
+          (push-mark (clatter--input-end) t t)
+          (call-interactively command)
+          (let ((raw (concat (string control) "word" (string control)))
+                (overlays (clatter-input-test--formatting-overlays)))
+            (should (eq (lookup-key clatter-input-formatting-mode-map
+                                    (kbd (concat "C-c C-f " key)))
+                        command))
+            (should (equal (clatter--get-input) raw))
+            (should (= (length overlays) 3))
+            (should (= (seq-count
+                        (lambda (overlay)
+                          (equal (overlay-get overlay 'display) ""))
+                        overlays)
+                       2))
+            (should (equal
+                     (get-char-property
+                      (1+ (marker-position clatter--input-marker)) 'face)
+                     face))
+            (clatter-input-formatting-mode -1)
+            (should-not (clatter-input-test--formatting-overlays))
+            (should (equal (clatter--get-input) raw))
+            (clatter-input-formatting-mode 1)
+            (primitive-undo 1 buffer-undo-list)
+            (should (equal (clatter--get-input) "word"))))))))
+
+(ert-deftest clatter-input-formatting-color ()
+  "Indexed colors wrap input and update their visible extent after edits."
+  (should (equal (clatter-format--color-name-for-index 0) "white"))
+  (should (equal (clatter-format--color-name-for-index 16) "dark red"))
+  (should (equal (clatter-format--color-name-for-index 87) "pale pink"))
+  (should (equal (clatter-format--color-name-for-index 88) "black"))
+  (should (equal (clatter-format--color-name-for-index 98) "white"))
+  (clatter-input-test--with 'oldest-first
+    (should clatter-input-formatting-mode)
+    (clatter--set-input "word tail")
+    (setq transient-mark-mode t)
+    (goto-char clatter--input-marker)
+    (push-mark (+ (marker-position clatter--input-marker) 4) t t)
+    (let ((answers '("04 light red #ff0000" "02 blue #00007f")))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt collection &rest _)
+                   (let* ((answer (pop answers))
+                          (annotation
+                           (plist-get completion-extra-properties
+                                      :annotation-function))
+                          (swatch (funcall annotation answer)))
+                     (should (member answer collection))
+                     (should
+                      (equal (plist-get (get-text-property 1 'face swatch)
+                                        :background)
+                             (clatter-format--color-for-index
+                              (string-to-number answer))))
+                     answer))))
+        (clatter-input-color)))
+    (let* ((input-start (marker-position clatter--input-marker))
+           (face '(:foreground "#ff0000" :background "#00007f"))
+           (raw (concat (string clatter-format--color)
+                        "04,02word" (string clatter-format--color) " tail")))
+      (should (equal (clatter--get-input) raw))
+      (should (equal (get-char-property (+ input-start 6) 'face) face))
+      (should-not (get-char-property (+ input-start 12) 'face))
+      (goto-char (+ input-start 10))
+      (delete-char 1)
+      (should (equal (get-char-property (+ input-start 11) 'face) face))
+      (insert (string clatter-format--color))
+      (should-not (get-char-property (+ input-start 12) 'face)))
+    (clatter--set-input "word")
+    (goto-char clatter--input-marker)
+    (push-mark (clatter--input-end) t t)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _)
+                 (should (member "default" collection))
+                 "default")))
+      (clatter-input-color))
+    (should
+     (equal (clatter--get-input)
+            (concat (string clatter-format--color)
+                    "word" (string clatter-format--color))))))
+
+(ert-deftest clatter-input-formatting-wire-preserves-controls ()
+  "Input overlays leave history and the sent IRC payload unchanged."
+  (let* ((clatter-send-typing nil)
+         (conn (clatter-test-make-connection "testnet" "me"))
+         (raw (concat (string clatter-format--bold)
+                      "bold"
+                      (string clatter-format--bold)
+                      " "
+                      (string clatter-format--color)
+                      "04,02color"
+                      (string clatter-format--color))))
+    (unwind-protect
+        (with-temp-buffer
+          (clatter-mode)
+          (setq-local clatter--network "testnet"
+                      clatter--target "#test"
+                      clatter--buffer-type 'channel)
+          (clatter--setup-prompt (current-buffer))
+          (should clatter-input-formatting-mode)
+          (goto-char clatter--input-marker)
+          (insert raw)
+          (should (equal (clatter--get-input) raw))
+          (clatter-test-with-mock-send
+            (clatter-send-input)
+            (should
+             (equal (clatter-test-last-sent)
+                    (concat "PRIVMSG #test :" raw))))
+          (should (equal (clatter-input-ring-nth 0) raw)))
+      (remhash (clatter-connection-network-id conn) clatter-connections))))
 
 ;; --- Slash command dispatch ---
 

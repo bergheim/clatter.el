@@ -537,6 +537,36 @@ line-oriented editing commands from other packages stay inside it. evil's =dd=,
 =cc=, =C-u=, =kill-whole-line= and friends clear the input instead of failing on
 the prompt.
 
+** Input formatting
+
+Clatter enables =clatter-input-formatting-mode= by default, rendering literal
+IRC formatting controls while you edit. Toggle it in the current buffer with
+=M-x clatter-input-formatting-mode=. To keep it disabled in new buffers:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'clatter-ui
+  (remove-hook 'clatter-mode-hook #'clatter-input-formatting-mode))
+#+end_src
+
+The local formatting prefix is =C-c C-f=:
+
+| Key         | Command                         | Formatting    |
+|-------------+---------------------------------+---------------|
+| =C-c C-f b= | =clatter-input-bold=            | Bold          |
+| =C-c C-f i= | =clatter-input-italic=          | Italic        |
+| =C-c C-f u= | =clatter-input-underline=       | Underline     |
+| =C-c C-f s= | =clatter-input-strikethrough=   | Strikethrough |
+| =C-c C-f m= | =clatter-input-monospace=       | Monospace     |
+| =C-c C-f v= | =clatter-input-reverse=         | Reverse video |
+| =C-c C-f r= | =clatter-input-reset=           | Reset all     |
+| =C-c C-f c= | =clatter-input-color=           | Indexed color |
+
+A style or color command wraps an active input selection; without a selection,
+it inserts a control at point so invoking it later closes the style. The color
+picker shows each index, readable name, hexadecimal value, and swatch. The
+buffer retains and sends the literal IRC bytes. Disabling the mode reveals
+those bytes.
+
 ** Action menu (C-c C-a)
 
 The menu dispatches on a single key:
@@ -1035,6 +1065,9 @@ Behavior notes:
 |-----------------------------+---------+-----------------------------------|
 | =clatter-format-enable=     | =t=     | Parse mIRC color/formatting codes |
 | =clatter-format-strip-only= | =nil=   | Strip codes without rendering     |
+
+=clatter-input-formatting-mode= renders these controls while editing by default;
+see [[*Input formatting]].
 
 ** URL Preview
 
