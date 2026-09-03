@@ -804,6 +804,8 @@ Messages from a fool are muted (hidden)."
   (if clatter-fools-visible
       (remove-from-invisibility-spec 'clatter-fool)
     (add-to-invisibility-spec 'clatter-fool))
+  (when (fboundp 'clatter--refresh-message-groups)
+    (clatter--refresh-message-groups))
   (when (fboundp 'clatter--refresh-compact-system-layout)
     (clatter--refresh-compact-system-layout)))
 

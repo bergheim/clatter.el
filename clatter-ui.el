@@ -502,13 +502,9 @@ cols."
         (concat "-" (substring (match-string 1 nick-str) 0 (- width 4)) "…-"))
        (t (substring nick-str 0 (1- width)))))))
 
-(defun clatter--format-nick-column (nick-str &optional face sender blank)
+(defun clatter--format-nick-column (nick-str &optional face sender)
   "Right-align NICK-STR within `clatter-nick-column-width'.
 Apply FACE and set clatter-sender property to SENDER if provided.
-When BLANK is non-nil, return a column of spaces (no nick text, no
-face) that still carries the `clatter-sender' and
-`clatter-navigation-target' properties, so grouped lines keep their
-sender metadata for navigation and highlighting.
 
 When `clatter-nick-column-truncate' is non-nil, NICK-STR longer than
 the column width is truncated to fit (preserving the `<...>' or
@@ -517,36 +513,33 @@ push its message text past the column and break alignment with
 neighbors."
   (let* ((width clatter-nick-column-width)
          (nick-text (copy-sequence nick-str))
-         (padded nil))
-    (if blank
-        ;; Blank column for grouped messages: preserve alignment and the
-        ;; sender/navigation properties without rendering the nick itself.
-        (propertize (make-string width ?\s)
-                    'clatter-navigation-target 'message
-                    'clatter-sender sender)
-      (when (and clatter-nick-column-truncate
-                 (> (clatter--nick-column-display-width nick-text) width))
-        (setq nick-text (clatter--truncate-nick-column nick-text width)))
-      (let ((pad (max 0 (- width (clatter--nick-column-display-width nick-text)))))
-        (when face
-          (add-face-text-property 0 (length nick-text) face nil nick-text))
-        (add-text-properties 0 (length nick-text)
-                             '(clatter-navigation-target message)
-                             nick-text)
-        (setq padded (concat (make-string pad ?\s) nick-text))
-        (when sender
-          (setq padded (propertize padded 'clatter-sender sender)))
-        padded))))
+         padded)
+    (when (and clatter-nick-column-truncate
+               (> (clatter--nick-column-display-width nick-text) width))
+      (setq nick-text (clatter--truncate-nick-column nick-text width)))
+    (let ((pad (max 0 (- width
+                         (clatter--nick-column-display-width nick-text)))))
+      (when face
+        (add-face-text-property 0 (length nick-text) face nil nick-text))
+      (add-text-properties 0 (length nick-text)
+                           '(clatter-navigation-target message)
+                           nick-text)
+      (setq padded (concat (make-string pad ?\s) nick-text))
+      (when sender
+        (setq padded (propertize padded 'clatter-sender sender)))
+      (propertize padded 'clatter-nick-column t))))
 
 (defun clatter--format-system-prefix (prefix-str)
   "Right-align PREFIX-STR (e.g. \"***\") within the nick column."
   (let* ((width clatter-nick-column-width)
          (plen (length prefix-str))
          (pad (max 0 (- width plen))))
-    (concat (make-string pad ?\s)
-            (propertize prefix-str
-                        'face 'clatter-system
-                        'clatter-navigation-target 'message))))
+    (propertize
+     (concat (make-string pad ?\s)
+             (propertize prefix-str
+                         'face 'clatter-system
+                         'clatter-navigation-target 'message))
+     'clatter-nick-column t)))
 
 (defvar clatter--group-messages-adjacency-only nil
   "When non-nil, `clatter--group-with-previous-p' ignores the time window.
@@ -617,39 +610,104 @@ no message text properties are present there."
                    (get-text-property bol 'clatter-sender)
                    bol))))))))
 
+(defun clatter--group-with-message-p (bol sender server-time)
+  "Return non-nil when SENDER groups with the message at BOL.
+The caller must arrange for BOL to be the previous visible message."
+  (and bol
+       (eq (get-text-property bol 'clatter-msg-type) 'privmsg)
+       (let ((prev-sender (get-text-property bol 'clatter-sender)))
+         (and prev-sender
+              (string-equal-ignore-case prev-sender sender)
+              (let ((prev-time
+                     (get-text-property bol 'clatter-server-time))
+                    (new-time (or server-time (current-time))))
+                (or (null clatter-group-messages-window)
+                    clatter--group-messages-adjacency-only
+                    (null prev-time)
+                    (null new-time)
+                    (<= (abs
+                         (float-time
+                          (time-subtract new-time prev-time)))
+                        clatter-group-messages-window)))))))
+
 (defun clatter--group-with-previous-p (buffer sender server-time)
   "Return non-nil when SENDER's new message groups with the previous one.
 This is true when `clatter-group-messages-by-nick' is enabled, the
-chronologically-previous message in BUFFER is a PRIVMSG from SENDER
-(case-insensitive), and the gap between the two is within
+chronologically-previous visible message in BUFFER is a PRIVMSG from
+SENDER (case-insensitive), and the gap between the two is within
 `clatter-group-messages-window'.  When either timestamp is missing the
 window check is skipped (adjacency alone groups), as it is when
 `clatter--group-messages-adjacency-only' is set (e.g. during history
 playback).  SERVER-TIME is the Emacs time value of the new message; nil
 means now."
   (and clatter-group-messages-by-nick
-       (let ((bol (clatter--previous-message-bol buffer)))
-         ;; `bol' is a position in BUFFER, so the text-property reads
-         ;; below must run there -- not in the caller's (often the
-         ;; process filter) buffer, whose size is unrelated and would
-         ;; raise "Args out of range".
-         (and bol
-              (with-current-buffer (or buffer (current-buffer))
-                (and (eq (get-text-property bol 'clatter-msg-type) 'privmsg)
-                     (let ((prev-sender (get-text-property bol
-                                                           'clatter-sender)))
-                       (and prev-sender
-                            (string-equal-ignore-case prev-sender sender)
-                            (let ((prev-time (get-text-property bol
-                                                                'clatter-server-time))
-                                  (new-time (or server-time (current-time))))
-                              (or (null clatter-group-messages-window)
-                                  clatter--group-messages-adjacency-only
-                                  (null prev-time)
-                                  (null new-time)
-                                  (<= (abs (float-time
-                                            (time-subtract new-time prev-time)))
-                                      clatter-group-messages-window)))))))))))
+       (with-current-buffer (or buffer (current-buffer))
+         (clatter--group-with-message-p
+          (clatter--previous-message-bol) sender server-time))))
+
+(defun clatter--refresh-message-groups ()
+  "Recompute visible nick groups and gaps in the current buffer."
+  (let ((inhibit-read-only t)
+        (buffer-undo-list t)
+        positions)
+    (save-excursion
+      (goto-char (point-min))
+      (while (< (point) (point-max))
+        (when (get-text-property (point) 'clatter-nick-column)
+          (push (point) positions))
+        (forward-line 1)))
+    (dolist (bol positions)
+      (let* ((line-end (save-excursion
+                         (goto-char bol)
+                         (line-end-position)))
+             (end (next-single-property-change
+                   bol 'clatter-nick-column nil line-end)))
+        (remove-text-properties
+         bol end '(clatter-grouped nil display nil)))
+      (let ((eol (save-excursion (goto-char bol) (line-end-position))))
+        (when (< eol (point-max))
+          (remove-text-properties eol (1+ eol) '(line-spacing nil)))))
+    (when clatter-group-messages-by-nick
+      (when (eq clatter-message-order 'oldest-first)
+        (setq positions (nreverse positions)))
+      (let (previous)
+        (dolist (bol positions)
+          (unless (invisible-p bol)
+            (let* ((sender (get-text-property bol 'clatter-sender))
+                   (server-time
+                    (get-text-property bol 'clatter-server-time))
+                   (grouped-p
+                    (and sender
+                         (eq (get-text-property bol 'clatter-msg-type)
+                             'privmsg)
+                         (clatter--group-with-message-p
+                          previous sender server-time))))
+              (when grouped-p
+                (let* ((line-end (save-excursion
+                                   (goto-char bol)
+                                   (line-end-position)))
+                       (end (next-single-property-change
+                             bol 'clatter-nick-column nil line-end)))
+                  (add-text-properties
+                   bol end
+                   (list 'clatter-grouped t
+                         'display
+                         (make-string clatter-nick-column-width ?\s)))))
+              (when (and previous
+                         (not grouped-p)
+                         (numberp clatter-group-messages-gap)
+                         (> clatter-group-messages-gap 0))
+                (let* ((boundary
+                        (if (eq clatter-message-order 'oldest-first)
+                            previous bol))
+                       (eol (save-excursion
+                              (goto-char boundary)
+                              (line-end-position))))
+                  (when (< eol (point-max))
+                    (put-text-property
+                     eol (1+ eol) 'line-spacing
+                     clatter-group-messages-gap))))
+              (setq previous bol))))))))
 
 (defun clatter--update-undo-list (shift)
   "Shift integer buffer positions in `buffer-undo-list' by SHIFT.
@@ -1064,19 +1122,27 @@ network/target for jump-back)."
          (insert-before-previous-p
           (not (eq (and clatter--insert-at-backlog-end t)
                    (eq clatter-message-order 'newest-first))))
-         (nick-col (cond
-                    ((eq 'action msg-type)
-                     (clatter--format-nick-column "*" 'clatter-action sender))
-                    ((eq 'notice msg-type)
-                     (clatter--format-nick-column
-                      (concat (format "-%s-" sender) bot-tag-delim bot-tag)
-                      'clatter-notice))
-                    (t
-                     (if grouped-p
-                         (clatter--format-nick-column "" nil sender 'blank)
-                       (clatter--format-nick-column
-                        (concat (clatter--format-sender sender) bot-tag-delim bot-tag)
-                        nick-face sender)))))
+         (nick-col
+          (let ((column
+                 (cond
+                  ((eq 'action msg-type)
+                   (clatter--format-nick-column
+                    "*" 'clatter-action sender))
+                  ((eq 'notice msg-type)
+                   (clatter--format-nick-column
+                    (concat (format "-%s-" sender) bot-tag-delim bot-tag)
+                    'clatter-notice))
+                  (t
+                   (clatter--format-nick-column
+                    (concat (clatter--format-sender sender)
+                            bot-tag-delim bot-tag)
+                    nick-face sender)))))
+            (if grouped-p
+                (propertize
+                 column
+                 'clatter-grouped t
+                 'display (make-string clatter-nick-column-width ?\s))
+              column)))
          (msg-text (prog1 hl-text
                      (cond
                       ((eq 'action msg-type)

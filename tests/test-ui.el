@@ -2484,16 +2484,20 @@ last ran a query command."
     (save-excursion
       (goto-char (point-min))
       (when (search-forward text nil t)
-        (beginning-of-line)
-        (point)))))
+        (line-beginning-position)))))
 
 (defun clatter-test--nick-column-at (buffer bol)
-  "Return the visible nick-column text (first `clatter-nick-column-width' chars) at BOL in BUFFER."
+  "Return the rendered nick column at BOL in BUFFER."
   (with-current-buffer buffer
-    (save-excursion
-      (goto-char bol)
-      (buffer-substring-no-properties
-       bol (min (+ bol clatter-nick-column-width) (line-end-position))))))
+    (let* ((line-end (save-excursion
+                       (goto-char bol)
+                       (line-end-position)))
+           (end (next-single-property-change
+                 bol 'clatter-nick-column nil line-end))
+           (display (get-text-property bol 'display)))
+      (if (get-text-property bol 'clatter-grouped)
+          display
+        (buffer-substring-no-properties bol end)))))
 
 (defun clatter-test--line-spacing-at (buffer bol)
   "Return the line-spacing property on the newline after BOL in BUFFER."
@@ -2566,51 +2570,71 @@ ORDER is the `clatter-message-order', CONN the mock connection."
                            (if (eq order 'oldest-first) third-bol second-bol))))))
       (remhash "testnet" clatter-connections))))
 
-(ert-deftest clatter-group-messages-gap-skips-hidden-fools ()
-  "Hidden fool messages neither anchor the gap nor receive it.
-Same visible sender across a hidden fool groups without a gap; a
-different visible sender gets the gap on the previous visible message's
-newline, not on the invisible fool line."
+(ert-deftest clatter-group-messages-regroups-when-fools-toggle ()
+  "Visible nick groups and gaps follow fool visibility in either order."
   (let ((conn (clatter-test-make-connection "testnet" "me"))
         (clatter-group-messages-by-nick t)
         (clatter-group-messages-gap 0.25)
         (clatter-fools-visible nil))
     (unwind-protect
         (dolist (order '(oldest-first newest-first))
-          ;; Same sender resumes its group across a hidden fool: no gap.
           (clatter-test--with-grouping-buffer order conn
             (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
             (clatter-insert-privmsg (current-buffer) "fool" "foolish" conn
                                     nil 'clatter-fool)
             (clatter-insert-privmsg (current-buffer) "alice" "second" conn)
-            (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
-                  (fool-bol (clatter-test--find-line-bol (current-buffer) "foolish"))
-                  (second-bol (clatter-test--find-line-bol (current-buffer) "second")))
-              ;; Grouped: blank nick column on the later alice line.
-              (should (string-match-p "\\` *\\'"
-                                      (clatter-test--nick-column-at
-                                       (current-buffer) second-bol)))
+            (let ((first-bol
+                   (clatter-test--find-line-bol (current-buffer) "first"))
+                  (fool-bol
+                   (clatter-test--find-line-bol (current-buffer) "foolish"))
+                  (second-bol
+                   (clatter-test--find-line-bol (current-buffer) "second")))
+              ;; Hidden fools do not interrupt the visible group.
+              (should (string-match-p
+                       "\\` *\\'"
+                       (clatter-test--nick-column-at
+                        (current-buffer) second-bol)))
               (dolist (bol (list first-bol fool-bol second-bol))
-                (should-not (clatter-test--line-spacing-at
-                             (current-buffer) bol)))))
-          ;; Different sender: gap lands on the visible neighbor's newline.
-          (clatter-test--with-grouping-buffer order conn
-            (clatter-insert-privmsg (current-buffer) "alice" "first" conn)
-            (clatter-insert-privmsg (current-buffer) "fool" "foolish" conn
-                                    nil 'clatter-fool)
-            (clatter-insert-privmsg (current-buffer) "bob" "third" conn)
-            (let ((first-bol (clatter-test--find-line-bol (current-buffer) "first"))
-                  (fool-bol (clatter-test--find-line-bol (current-buffer) "foolish"))
-                  (third-bol (clatter-test--find-line-bol (current-buffer) "third")))
-              (should (equal (clatter-test--line-spacing-at
-                              (current-buffer)
-                              (if (eq order 'oldest-first) first-bol third-bol))
-                             0.25))
-              (should-not (clatter-test--line-spacing-at
-                           (current-buffer) fool-bol))
-              (should-not (clatter-test--line-spacing-at
-                           (current-buffer)
-                           (if (eq order 'oldest-first) third-bol first-bol))))))
+                (should-not
+                 (clatter-test--line-spacing-at (current-buffer) bol)))
+              ;; Revealing fools recomputes both nick columns and gaps.
+              (clatter-toggle-fools 1)
+              (setq first-bol
+                    (clatter-test--find-line-bol (current-buffer) "first")
+                    fool-bol
+                    (clatter-test--find-line-bol (current-buffer) "foolish")
+                    second-bol
+                    (clatter-test--find-line-bol (current-buffer) "second"))
+              (should (string-match-p
+                       "<fool>"
+                       (clatter-test--nick-column-at
+                        (current-buffer) fool-bol)))
+              (should (string-match-p
+                       "<alice>"
+                       (clatter-test--nick-column-at
+                        (current-buffer) second-bol)))
+              (dolist (bol (if (eq order 'oldest-first)
+                               (list first-bol fool-bol)
+                             (list fool-bol second-bol)))
+                (should (equal
+                         (clatter-test--line-spacing-at
+                          (current-buffer) bol)
+                         0.25)))
+              ;; Hiding fools restores the original visible group.
+              (clatter-toggle-fools -1)
+              (setq first-bol
+                    (clatter-test--find-line-bol (current-buffer) "first")
+                    fool-bol
+                    (clatter-test--find-line-bol (current-buffer) "foolish")
+                    second-bol
+                    (clatter-test--find-line-bol (current-buffer) "second"))
+              (should (string-match-p
+                       "\\` *\\'"
+                       (clatter-test--nick-column-at
+                        (current-buffer) second-bol)))
+              (dolist (bol (list first-bol fool-bol second-bol))
+                (should-not
+                 (clatter-test--line-spacing-at (current-buffer) bol))))))
       (remhash "testnet" clatter-connections))))
 
 (ert-deftest clatter-group-messages-gap-visible-fools-anchor ()

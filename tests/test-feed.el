@@ -52,12 +52,17 @@ unregisters the feed hooks whether or not BODY enabled them."
         (point)))))
 
 (defun clatter-test-feed--nick-column-at (buffer bol)
-  "Return the visible nick-column text at BOL in BUFFER."
+  "Return the rendered nick column at BOL in BUFFER."
   (with-current-buffer buffer
-    (save-excursion
-      (goto-char bol)
-      (buffer-substring-no-properties
-       bol (min (+ bol clatter-nick-column-width) (line-end-position))))))
+    (let* ((line-end (save-excursion
+                       (goto-char bol)
+                       (line-end-position)))
+           (end (next-single-property-change
+                 bol 'clatter-nick-column nil line-end))
+           (display (get-text-property bol 'display)))
+      (if (get-text-property bol 'clatter-grouped)
+          display
+        (buffer-substring-no-properties bol end)))))
 
 (defun clatter-test-feed--string (buffer)
   "Return the unpropertized contents of BUFFER."
