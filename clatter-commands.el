@@ -807,7 +807,9 @@ Messages from a fool are muted (hidden)."
   (when (fboundp 'clatter--refresh-message-groups)
     (clatter--refresh-message-groups))
   (when (fboundp 'clatter--refresh-compact-system-layout)
-    (clatter--refresh-compact-system-layout)))
+    (clatter--refresh-compact-system-layout))
+  (when (fboundp 'clatter--refresh-timestamps)
+    (clatter--refresh-timestamps)))
 
 (defun clatter--apply-fools-visibility ()
   "Apply `clatter-fools-visible' to every live clatter buffer."

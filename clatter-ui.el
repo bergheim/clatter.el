@@ -777,24 +777,11 @@ column is too narrow to wrap past the nick indent."
 ;; visual row can't be used.  Decided at insert time — stale after a
 ;; window resize until the line is rewritten.
 (defun clatter--timestamp-inline-break-p (eol ts-str)
-  "Return non-nil when the line ending at EOL leaves no room for TS-STR.
-Only the last display row decides: the stamp sits at the line's end, so
-a word-wrapped line offers whatever that row left over, not what its
-whole logical length would suggest."
+  "Return non-nil when the line ending at EOL leaves no room for TS-STR."
   (save-excursion
     (goto-char eol)
-    (let ((col (current-column))
-          (win (car (get-buffer-window-list nil nil 'visible))))
-      ;; Only the display engine knows where the last row begins; with no
-      ;; window to ask, the logical column is the best guess available.
-      (when win
-        (let ((line-start (line-beginning-position)))
-          (vertical-motion 0 win)
-          (setq col (- col (current-column)))
-          (unless (= (point) line-start)
-            (cl-incf col (string-width (or (get-text-property (point) 'wrap-prefix)
-                                           ""))))))
-      (> col (- (clatter--body-width) (string-width ts-str) 1)))))
+    (> (current-column)
+       (- (clatter--body-width) (string-width ts-str) 1))))
 
 (defun clatter--timestamp-overlay-apply (ov ts-str &optional tooltip)
   "Attach the timestamp string for TS-STR to OV for the current side.
@@ -804,37 +791,34 @@ TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
                            'help-echo tooltip))
         before)
     (overlay-put ov 'help-echo tooltip)
-    ;; Keep the raw stamp on the overlay so `clatter--timestamp-refresh-at'
-    ;; can apply it again.
+    ;; Keep the raw stamp on the overlay so refreshes can apply it again.
     (overlay-put ov 'clatter-timestamp-str ts-str)
     (overlay-put ov 'clatter-timestamp-tooltip tooltip)
+    ;; A display property wins over invisibility on an overlay string, so a
+    ;; hidden aligned space still consumes the row.  Install no string at all
+    ;; until the overlay is effectively visible.
     (setq before
-          (if (eq clatter-timestamp-side 'inline)
-              ;; Stamp sits on the message's last row; one that doesn't fit
-              ;; is dropped.  No fresh-row fallback: an overlay-string row
-              ;; has no buffer position of its own, so point can't land on
-              ;; it and vertical motion gets trapped.
-              (unless (clatter--timestamp-inline-break-p
-                       (overlay-start ov) ts-str)
-                (concat (propertize
-                         " " 'display
-                         `(space :align-to
-                                 (- right ,(string-width ts-str))))
-                        stamp))
-            ;; Apply 'default face after 'clatter-timestamp so no unwanted
-            ;; face properties are inherited from text which might be at
-            ;; point.
-            (propertize " " 'display
-                        `((margin ,(if (eq clatter-timestamp-side 'left)
-                                       'left-margin
-                                     'right-margin))
-                          ,stamp))))
-    ;; An overlay's `invisible' hides the text it covers but not its
-    ;; strings: a hidden line would keep its stamp, and with the covered
-    ;; newline gone the next line lands on that stamp's row at the wrap
-    ;; indent.  Carry the same spec on the string itself.
-    (when-let* ((invisible (and before (overlay-get ov 'invisible))))
-      (put-text-property 0 (length before) 'invisible invisible before))
+          (unless (invisible-p (overlay-start ov))
+            (if (eq clatter-timestamp-side 'inline)
+                ;; Stamp sits on the message's last row; one that doesn't fit
+                ;; is dropped.  No fresh-row fallback: an overlay-string row
+                ;; has no buffer position of its own, so point can't land on
+                ;; it and vertical motion gets trapped.
+                (unless (clatter--timestamp-inline-break-p
+                         (overlay-start ov) ts-str)
+                  (concat (propertize
+                           " " 'display
+                           `(space :align-to
+                                   (- right ,(string-width ts-str))))
+                          stamp))
+              ;; Apply 'default face after 'clatter-timestamp so no unwanted
+              ;; face properties are inherited from text which might be at
+              ;; point.
+              (propertize " " 'display
+                          `((margin ,(if (eq clatter-timestamp-side 'left)
+                                         'left-margin
+                                       'right-margin))
+                            ,stamp)))))
     (overlay-put ov 'before-string before)))
 
 (defun clatter--timestamp-refresh-at (position)
@@ -849,6 +833,15 @@ current state."
         (when-let* ((ts-str (overlay-get ov 'clatter-timestamp-str)))
           (clatter--timestamp-overlay-apply
            ov ts-str (overlay-get ov 'clatter-timestamp-tooltip)))))))
+
+(defun clatter--refresh-timestamps ()
+  "Reapply every timestamp overlay under the current visibility spec."
+  (when (clatter--timestamp-overlay-p)
+    (dolist (ov (overlays-in (point-min) (point-max)))
+      (when-let* (((overlay-get ov 'clatter-timestamp))
+                  (ts-str (overlay-get ov 'clatter-timestamp-str)))
+        (clatter--timestamp-overlay-apply
+         ov ts-str (overlay-get ov 'clatter-timestamp-tooltip))))))
 
 (defun clatter--timestamp-bucket-key (time)
   "Return the coalescing key for TIME, shared by every timestamp side.
@@ -977,9 +970,6 @@ append at the bottom like a traditional IRC client."
                         (fill-prefix wrap-prefix)
                         (adaptive-fill-mode nil))
                     (fill-region start (1- (point))))))
-              ;; Before the stamp: its fit is measured against the wrapping
-              ;; `wrap-prefix' produces.
-              (add-text-properties start (point) line-props)
               (when ts-str
                 (let ((ov (if (eq clatter-timestamp-side 'inline)
                               ;; Covers the final newline; rear stays put so
@@ -989,6 +979,7 @@ append at the bottom like a traditional IRC client."
                   (overlay-put ov 'clatter-timestamp t)
                   (overlay-put ov 'invisible invisible)
                   (clatter--timestamp-overlay-apply ov ts-str ts-tooltip-str)))
+              (add-text-properties start (point) line-props)
               (when msg-props
                 (add-text-properties start (point) msg-props))
               (when (clatter--fool-invisibility-p invisible)
@@ -2496,6 +2487,7 @@ connected (the common case) or absent."
       (add-to-invisibility-spec 'clatter-fool))
     (add-hook 'visible-mode-hook
               #'clatter--refresh-compact-system-layout nil t)
+    (add-hook 'visible-mode-hook #'clatter--refresh-timestamps t t)
     (clatter--setup-prompt buffer)
     (clatter--timestamp-divider-seed buffer)
     ;; Add mode-line.  Optionally include the activity crumbs (see

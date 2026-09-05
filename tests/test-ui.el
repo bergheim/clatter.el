@@ -572,16 +572,21 @@ always showing fool messages."
       (should (= (clatter-test--timestamp-overlay-count) 2)))))
 
 (ert-deftest clatter-test-timestamp-stamp-hidden-with-its-line ()
-  "A hidden line's stamp hides with it, for every overlay side."
+  "A hidden line has no stamp display string, for every overlay side."
   (let ((clatter-timestamp-format "%H:%M")
         (time (encode-time 30 12 10 1 1 2026)))
     (dolist (clatter-timestamp-side '(inline left right))
       (with-temp-buffer
-        (clatter--insert-message (current-buffer) "hidden" nil nil time '(noise))
-        (let ((before (overlay-get (clatter-test--timestamp-overlay)
-                                   'before-string)))
-          (should before)
-          (should (equal (get-text-property 0 'invisible before) '(noise))))))))
+        (setq-local buffer-invisibility-spec '(noise))
+        (clatter--insert-message (current-buffer) "hidden" nil nil time 'noise)
+        (let ((ov (clatter-test--timestamp-overlay)))
+          (should-not (overlay-get ov 'before-string))
+          (setq-local buffer-invisibility-spec nil)
+          (clatter--refresh-timestamps)
+          (should (overlay-get ov 'before-string))
+          (setq-local buffer-invisibility-spec '(noise))
+          (clatter--refresh-timestamps)
+          (should-not (overlay-get ov 'before-string)))))))
 
 (ert-deftest clatter-test-timestamp-side-left-margin ()
   "Left timestamp side configures the left margin."
@@ -671,8 +676,8 @@ always showing fool messages."
             (should (equal (overlay-get ov 'help-echo) "10:12:00"))))
       (clatter-test-cleanup))))
 
-(ert-deftest clatter-test-timestamp-inline-fits-on-last-wrapped-row ()
-  "A wrapped line keeps its stamp when its last display row has room."
+(ert-deftest clatter-test-timestamp-inline-drops-on-wrapped-row-with-room ()
+  "A wrapped line drops its stamp even when its final row has room."
   (let ((clatter-timestamp-side 'inline)
         (clatter-timestamp-format "%H:%M")
         (clatter-timestamp-only-if-changed nil)
@@ -689,8 +694,8 @@ always showing fool messages."
            (concat (make-string (window-body-width) ?x) " tail")
            conn time)
           (with-current-buffer buffer
-            (should (overlay-get (clatter-test--timestamp-overlay)
-                                 'before-string))))
+            (should-not (overlay-get (clatter-test--timestamp-overlay)
+                                     'before-string))))
       (kill-buffer buffer)
       (clatter-test-cleanup))))
 
@@ -1617,18 +1622,25 @@ system messages."
       (should-not (memq 'clatter-fool buffer-invisibility-spec)))))
 
 (ert-deftest clatter-test-toggle-fools-updates-existing-buffer ()
-  "Toggling fool visibility updates existing clatter buffers."
-  (let ((old clatter-fools-visible))
+  "Toggling fool visibility updates existing messages and their stamps."
+  (let ((old clatter-fools-visible)
+        (clatter-timestamp-side 'inline))
     (unwind-protect
         (with-temp-buffer
           (clatter-mode)
           (setq buffer-invisibility-spec '(clatter-fool muted))
-          (clatter-toggle-fools 1)
-          (should clatter-fools-visible)
-          (should-not (memq 'clatter-fool buffer-invisibility-spec))
-          (clatter-toggle-fools -1)
-          (should-not clatter-fools-visible)
-          (should (memq 'clatter-fool buffer-invisibility-spec)))
+          (clatter--insert-message
+           (current-buffer) "hidden" nil nil nil 'clatter-fool)
+          (let ((ov (clatter-test--timestamp-overlay)))
+            (should-not (overlay-get ov 'before-string))
+            (clatter-toggle-fools 1)
+            (should clatter-fools-visible)
+            (should-not (memq 'clatter-fool buffer-invisibility-spec))
+            (should (overlay-get ov 'before-string))
+            (clatter-toggle-fools -1)
+            (should-not clatter-fools-visible)
+            (should (memq 'clatter-fool buffer-invisibility-spec))
+            (should-not (overlay-get ov 'before-string))))
       (setq clatter-fools-visible old))))
 
 (ert-deftest clatter-test-suppress-preserves-fool-visibility ()
