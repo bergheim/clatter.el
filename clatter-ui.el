@@ -777,11 +777,24 @@ column is too narrow to wrap past the nick indent."
 ;; visual row can't be used.  Decided at insert time — stale after a
 ;; window resize until the line is rewritten.
 (defun clatter--timestamp-inline-break-p (eol ts-str)
-  "Return non-nil when the line ending at EOL leaves no room for TS-STR."
+  "Return non-nil when the line ending at EOL leaves no room for TS-STR.
+Only the last display row decides: the stamp sits at the line's end, so
+a word-wrapped line offers whatever that row left over, not what its
+whole logical length would suggest."
   (save-excursion
     (goto-char eol)
-    (> (current-column)
-       (- (clatter--body-width) (string-width ts-str) 1))))
+    (let ((col (current-column))
+          (win (car (get-buffer-window-list nil nil 'visible))))
+      ;; Only the display engine knows where the last row begins; with no
+      ;; window to ask, the logical column is the best guess available.
+      (when win
+        (let ((line-start (line-beginning-position)))
+          (vertical-motion 0 win)
+          (setq col (- col (current-column)))
+          (unless (= (point) line-start)
+            (cl-incf col (string-width (or (get-text-property (point) 'wrap-prefix)
+                                           ""))))))
+      (> col (- (clatter--body-width) (string-width ts-str) 1)))))
 
 (defun clatter--timestamp-overlay-apply (ov ts-str &optional tooltip)
   "Attach the timestamp string for TS-STR to OV for the current side.
@@ -964,6 +977,9 @@ append at the bottom like a traditional IRC client."
                         (fill-prefix wrap-prefix)
                         (adaptive-fill-mode nil))
                     (fill-region start (1- (point))))))
+              ;; Before the stamp: its fit is measured against the wrapping
+              ;; `wrap-prefix' produces.
+              (add-text-properties start (point) line-props)
               (when ts-str
                 (let ((ov (if (eq clatter-timestamp-side 'inline)
                               ;; Covers the final newline; rear stays put so
@@ -973,7 +989,6 @@ append at the bottom like a traditional IRC client."
                   (overlay-put ov 'clatter-timestamp t)
                   (overlay-put ov 'invisible invisible)
                   (clatter--timestamp-overlay-apply ov ts-str ts-tooltip-str)))
-              (add-text-properties start (point) line-props)
               (when msg-props
                 (add-text-properties start (point) msg-props))
               (when (clatter--fool-invisibility-p invisible)

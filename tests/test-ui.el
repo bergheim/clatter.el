@@ -671,6 +671,29 @@ always showing fool messages."
             (should (equal (overlay-get ov 'help-echo) "10:12:00"))))
       (clatter-test-cleanup))))
 
+(ert-deftest clatter-test-timestamp-inline-fits-on-last-wrapped-row ()
+  "A wrapped line keeps its stamp when its last display row has room."
+  (let ((clatter-timestamp-side 'inline)
+        (clatter-timestamp-format "%H:%M")
+        (clatter-timestamp-only-if-changed nil)
+        (clatter-fill-column nil)
+        (conn (clatter-test-make-connection))
+        (time (encode-time 0 12 10 1 1 2026))
+        (buffer (generate-new-buffer "*clatter-test-wrap*")))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer buffer (clatter-mode))
+          (set-window-buffer (selected-window) buffer)
+          (clatter-insert-privmsg
+           buffer "alice"
+           (concat (make-string (window-body-width) ?x) " tail")
+           conn time)
+          (with-current-buffer buffer
+            (should (overlay-get (clatter-test--timestamp-overlay)
+                                 'before-string))))
+      (kill-buffer buffer)
+      (clatter-test-cleanup))))
+
 (ert-deftest clatter-test-timestamp-inline-stamps-system ()
   "Inline stamps the same lines margin modes stamp, system included."
   (let ((clatter-timestamp-side 'inline)
