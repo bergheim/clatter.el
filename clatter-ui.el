@@ -788,42 +788,50 @@ column is too narrow to wrap past the nick indent."
 TOOLTIP, when non-nil, becomes the stamp's `help-echo'."
   (let ((stamp (propertize ts-str
                            'face '(clatter-timestamp default)
-                           'help-echo tooltip)))
+                           'help-echo tooltip))
+        before)
     (overlay-put ov 'help-echo tooltip)
-    (if (eq clatter-timestamp-side 'inline)
-        ;; Stamp sits on the message's last row; one that doesn't fit is
-        ;; dropped.  No fresh-row fallback: an overlay-string row has no
-        ;; buffer position of its own, so point can't land on it and
-        ;; vertical motion gets trapped.  Keep the raw stamp on the
-        ;; overlay so `clatter--timestamp-inline-refresh-at' can re-fit.
-        (progn
-          (overlay-put ov 'clatter-timestamp-str ts-str)
-          (overlay-put ov 'clatter-timestamp-tooltip tooltip)
-          (overlay-put ov 'before-string
-                       (unless (clatter--timestamp-inline-break-p
-                                (overlay-start ov) ts-str)
-                         (concat (propertize
-                                  " " 'display
-                                  `(space :align-to
-                                     (- right ,(string-width ts-str))))
-                                 stamp))))
-      ;; Apply 'default face after 'clatter-timestamp so no unwanted face
-      ;; properties are inherited from text which might be at point.
-      (overlay-put ov 'before-string
-                   (propertize " " 'display
-                               `((margin ,(if (eq clatter-timestamp-side 'left)
-                                              'left-margin
-                                            'right-margin))
-                                 ,stamp))))))
+    ;; Keep the raw stamp on the overlay so `clatter--timestamp-refresh-at'
+    ;; can apply it again.
+    (overlay-put ov 'clatter-timestamp-str ts-str)
+    (overlay-put ov 'clatter-timestamp-tooltip tooltip)
+    (setq before
+          (if (eq clatter-timestamp-side 'inline)
+              ;; Stamp sits on the message's last row; one that doesn't fit
+              ;; is dropped.  No fresh-row fallback: an overlay-string row
+              ;; has no buffer position of its own, so point can't land on
+              ;; it and vertical motion gets trapped.
+              (unless (clatter--timestamp-inline-break-p
+                       (overlay-start ov) ts-str)
+                (concat (propertize
+                         " " 'display
+                         `(space :align-to
+                                 (- right ,(string-width ts-str))))
+                        stamp))
+            ;; Apply 'default face after 'clatter-timestamp so no unwanted
+            ;; face properties are inherited from text which might be at
+            ;; point.
+            (propertize " " 'display
+                        `((margin ,(if (eq clatter-timestamp-side 'left)
+                                       'left-margin
+                                     'right-margin))
+                          ,stamp))))
+    ;; An overlay's `invisible' hides the text it covers but not its
+    ;; strings: a hidden line would keep its stamp, and with the covered
+    ;; newline gone the next line lands on that stamp's row at the wrap
+    ;; indent.  Carry the same spec on the string itself.
+    (when-let* ((invisible (and before (overlay-get ov 'invisible))))
+      (put-text-property 0 (length before) 'invisible invisible before))
+    (overlay-put ov 'before-string before)))
 
-(defun clatter--timestamp-inline-refresh-at (eol)
-  "Re-fit the inline stamp on the line ending at EOL.
-Compact system groups change a line after its stamp's fit was decided —
-appends lengthen it, visibility toggles change its displayed width — so
-apply the stamp again: the fit check drops or restores it, the same
-rule as at insert time."
-  (when (eq clatter-timestamp-side 'inline)
-    (dolist (ov (overlays-at eol))
+(defun clatter--timestamp-refresh-at (position)
+  "Apply the stamp of any timestamp overlay at POSITION again.
+Compact system groups change a line after its stamp was applied —
+appends lengthen it, visibility toggles change what the stamp must
+hide and how wide the line displays — so apply it again under the
+current state."
+  (when (clatter--timestamp-overlay-p)
+    (dolist (ov (overlays-at position))
       (when (overlay-get ov 'clatter-timestamp)
         (when-let* ((ts-str (overlay-get ov 'clatter-timestamp-str)))
           (clatter--timestamp-overlay-apply
@@ -962,9 +970,9 @@ append at the bottom like a traditional IRC client."
                               ;; a message inserted below can't extend it.
                               (make-overlay (1- (point)) (point) nil t)
                             (make-overlay start (1+ start) nil t))))
-                  (clatter--timestamp-overlay-apply ov ts-str ts-tooltip-str)
                   (overlay-put ov 'clatter-timestamp t)
-                  (overlay-put ov 'invisible invisible)))
+                  (overlay-put ov 'invisible invisible)
+                  (clatter--timestamp-overlay-apply ov ts-str ts-tooltip-str)))
               (add-text-properties start (point) line-props)
               (when msg-props
                 (add-text-properties start (point) msg-props))
@@ -1602,8 +1610,9 @@ shared layout coherent when `buffer-invisibility-spec' changes, notably when
                newline-position group-end 'invisible
                (and first-event-start
                     (get-text-property first-event-start 'invisible)))))
+          (clatter--timestamp-refresh-at group-start)
           (when newline-position
-            (clatter--timestamp-inline-refresh-at newline-position))
+            (clatter--timestamp-refresh-at newline-position))
           (setq position group-end)))
       (clatter--refresh-input-spacers (current-buffer)))))
 
@@ -1707,7 +1716,7 @@ INVISIBLE categories so smart-hidden and visible actions can share a group."
                            (make-string (1+ clatter-nick-column-width) ?\s)
                            'line-prefix ""))
                     (set-marker tail (point))
-                    (clatter--timestamp-inline-refresh-at (point))))
+                    (clatter--timestamp-refresh-at (point))))
                 (when (and pre-input clatter--input-marker)
                   (clatter--update-undo-list
                    (- (marker-position clatter--input-marker) pre-input)))

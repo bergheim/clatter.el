@@ -571,6 +571,18 @@ always showing fool messages."
       (clatter--insert-message (current-buffer) "second" nil nil time)
       (should (= (clatter-test--timestamp-overlay-count) 2)))))
 
+(ert-deftest clatter-test-timestamp-stamp-hidden-with-its-line ()
+  "A hidden line's stamp hides with it, for every overlay side."
+  (let ((clatter-timestamp-format "%H:%M")
+        (time (encode-time 30 12 10 1 1 2026)))
+    (dolist (clatter-timestamp-side '(inline left right))
+      (with-temp-buffer
+        (clatter--insert-message (current-buffer) "hidden" nil nil time '(noise))
+        (let ((before (overlay-get (clatter-test--timestamp-overlay)
+                                   'before-string)))
+          (should before)
+          (should (equal (get-text-property 0 'invisible before) '(noise))))))))
+
 (ert-deftest clatter-test-timestamp-side-left-margin ()
   "Left timestamp side configures the left margin."
   (let ((clatter-timestamp-side 'left)
